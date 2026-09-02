@@ -1,0 +1,15 @@
+/* Keep nested interview controls from inheriting the outer Q&A divider. */
+.practice-mode .practice-reveal {
+  border-top: 0 !important;
+}
+
+/* The outer .qa-card[open] summary rule also reaches this nested summary.
+   Remove that inherited divider; the editor body owns the single divider. */
+.qa-card[open] .own-answer-editor > summary {
+  border-bottom: 0 !important;
+}
+
+/* When the editor is expanded, keep exactly one separator between its header and body. */
+.own-answer-editor[open] > .own-answer-editor__body {
+  border-top: 1px solid var(--line);
+}
