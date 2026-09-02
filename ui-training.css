@@ -170,8 +170,11 @@ html[data-theme="dark"] {
 .qa-card.mastery-confident .qa-index { background: var(--study-green-soft); color: var(--study-green); }
 
 .own-answer-editor {
-  margin-top: 14px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  margin-top: 16px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 88%, transparent);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
 }
 .own-answer-editor > summary {
   list-style: none;
@@ -179,9 +182,10 @@ html[data-theme="dark"] {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 2px 4px;
+  padding: 14px 16px;
   cursor: pointer;
   color: var(--text);
+  background: color-mix(in srgb, var(--surface-soft) 76%, var(--study-blue-soft));
   font-size: 15px;
   font-weight: 800;
 }
@@ -191,14 +195,17 @@ html[data-theme="dark"] {
   font-size: 12px;
   font-weight: 700;
 }
-.own-answer-editor__body { padding-top: 10px; }
+.own-answer-editor__body {
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--line);
+}
 .own-answer-editor textarea {
   width: 100%;
   min-height: 154px;
   resize: vertical;
   padding: 14px 15px;
   border: 1px solid var(--line-strong);
-  border-radius: 11px;
+  border-radius: 10px;
   outline: none;
   background: var(--surface);
   color: var(--text);
@@ -215,7 +222,7 @@ html[data-theme="dark"] {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 7px;
+  margin-top: 8px;
   color: var(--muted);
   font-size: 12px;
 }
@@ -245,6 +252,9 @@ html[data-theme="dark"] {
   .answer-timer,
   .mastery-control { width: 100%; }
   .mastery-button { flex: 1; padding: 0 8px; }
+  .own-answer-editor { border-radius: 10px; }
+  .own-answer-editor > summary { padding: 13px 14px; }
+  .own-answer-editor__body { padding: 12px 14px 14px; }
   .own-answer-editor textarea { font-size: 16px; min-height: 138px; }
   .own-answer-editor__footer { align-items: flex-start; flex-direction: column; gap: 2px; }
 }
