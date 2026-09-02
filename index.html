@@ -1,12 +1,13 @@
 <!doctype html>
-<html lang="ja" data-theme="light">
+<html lang="ja" data-theme="light" data-reading-size="medium">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="テンフィールズファクトリー AI社内SE 面接対策。質問・回答例、検索、音声読み上げ、昼夜モード。" />
-  <title>AI社内SE 面接対策｜テンフィールズファクトリー</title>
-  <link rel="stylesheet" href="styles.css?v=4" />
-  <link rel="stylesheet" href="ui-polish.css?v=1" />
+  <meta name="description" content="AI社内SE 面接対策。質問・回答例、検索、音声読み上げ、昼夜モード。" />
+  <title>AI社内SE 面接対策｜Interview Questions</title>
+  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="ui-polish.css?v=2" />
+  <link rel="stylesheet" href="ui-study.css?v=1" />
 </head>
 <body>
   <a class="skip-link" href="#questions">質問一覧へ移動</a>
@@ -44,6 +45,26 @@
       </div>
     </section>
 
+    <div class="study-tools-wrap">
+      <div class="study-tools" aria-label="学習表示設定">
+        <div class="mode-switch" role="group" aria-label="表示モード">
+          <button id="normalModeButton" class="mode-button is-active" type="button" aria-pressed="true">通常表示</button>
+          <button id="practiceModeButton" class="mode-button" type="button" aria-pressed="false">面接練習モード</button>
+        </div>
+        <div class="study-stats" aria-label="学習状況">
+          <span class="study-stat study-stat--favorite">★ 重点 <strong id="favoriteCount">0</strong></span>
+          <span class="study-stat study-stat--practiced">✓ 練習済み <strong id="practicedCount">0</strong></span>
+          <span class="study-stat">未練習 <strong id="remainingCount">0</strong></span>
+        </div>
+        <div class="reading-size-control" role="group" aria-label="文字サイズ">
+          <span>文字</span>
+          <button class="reading-size-button" type="button" data-reading-size="small" aria-label="文字を小さく">A−</button>
+          <button class="reading-size-button is-active" type="button" data-reading-size="medium" aria-label="標準の文字サイズ">A</button>
+          <button class="reading-size-button" type="button" data-reading-size="large" aria-label="文字を大きく">A＋</button>
+        </div>
+      </div>
+    </div>
+
     <div class="layout">
       <aside class="sidebar" aria-label="カテゴリ"><div class="sidebar__sticky"><p class="sidebar__title">カテゴリ</p><nav id="categoryNav"></nav><div class="practice-note"><strong>練習のコツ</strong><p>回答を丸暗記せず、「結論 → 具体例 → この会社でどう活かすか」の3点だけ覚えると自然に話せます。</p></div></div></aside>
       <section class="content" id="questions" aria-live="polite">
@@ -54,12 +75,12 @@
     </div>
   </main>
 
-  <footer><p>Interview Questions · テンフィールズファクトリー AI社内SE 面接対策</p></footer>
+  <footer><p>Interview Questions · AI社内SE 面接対策</p></footer>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="data-1.js?v=1"></script>
   <script src="data-2.js?v=1"></script>
   <script src="data-3.js?v=1"></script>
   <script src="data-4.js?v=1"></script>
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
