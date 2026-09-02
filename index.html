@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="styles.css?v=5" />
   <link rel="stylesheet" href="ui-polish.css?v=2" />
   <link rel="stylesheet" href="ui-study.css?v=2" />
+  <link rel="stylesheet" href="ui-training.css?v=1" />
 </head>
 <body>
   <a class="skip-link" href="#questions">質問一覧へ移動</a>
@@ -63,6 +64,26 @@
           <button class="reading-size-button" type="button" data-reading-size="large" aria-label="文字を大きく">A＋</button>
         </div>
       </div>
+
+      <div class="training-tools" aria-label="模擬面接ツール">
+        <div class="training-tools__group">
+          <span class="training-tools__label">ランダム練習</span>
+          <select id="randomSource" class="training-select" aria-label="ランダム練習の対象">
+            <option value="all">全質問</option>
+            <option value="favorites">重点のみ</option>
+            <option value="remaining">未練習のみ</option>
+          </select>
+          <button id="randomPracticeButton" class="training-action training-action--primary" type="button">10問出題</button>
+          <button id="randomResetButton" class="training-action" type="button" hidden>解除</button>
+          <span id="randomSessionLabel" class="random-session-label" hidden></span>
+        </div>
+        <div class="training-tools__group" role="group" aria-label="回答時間">
+          <span class="training-tools__label">回答時間</span>
+          <button class="timer-setting-button" type="button" data-timer-seconds="30">30秒</button>
+          <button class="timer-setting-button is-active" type="button" data-timer-seconds="60">60秒</button>
+          <button class="timer-setting-button" type="button" data-timer-seconds="90">90秒</button>
+        </div>
+      </div>
     </div>
 
     <div class="layout">
@@ -82,5 +103,6 @@
   <script src="data-3.js?v=1"></script>
   <script src="data-4.js?v=1"></script>
   <script src="app.js?v=5"></script>
+  <script src="training.js?v=1"></script>
 </body>
 </html>
