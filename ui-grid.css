@@ -6,6 +6,7 @@
 /* One shared horizontal grid for the entire page. */
 .topbar__inner,
 .hero__content,
+.interview-library-wrap,
 .study-tools-wrap,
 .layout {
   width: min(var(--shell-width), calc(100% - var(--shell-gutter)));
@@ -28,6 +29,7 @@
 
   .topbar__inner,
   .hero__content,
+  .interview-library-wrap,
   .study-tools-wrap,
   .layout {
     width: calc(100% - var(--shell-gutter));
@@ -39,6 +41,7 @@
 
   .topbar__inner,
   .hero__content,
+  .interview-library-wrap,
   .study-tools-wrap,
   .layout {
     width: calc(100% - var(--shell-gutter));
