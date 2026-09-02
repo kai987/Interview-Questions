@@ -1,0 +1,107 @@
+/* iOS-like segmented controls: one shared sliding thumb per control group. */
+:root {
+  --ios-segment-track: color-mix(in srgb, var(--surface-soft) 88%, #dfe5ee);
+  --ios-segment-thumb-top: rgba(255, 255, 255, 0.98);
+  --ios-segment-thumb-bottom: rgba(250, 251, 253, 0.94);
+  --ios-segment-thumb-border: rgba(120, 135, 158, 0.16);
+  --ios-segment-shadow: 0 1px 2px rgba(19, 32, 54, 0.10), 0 5px 14px rgba(19, 32, 54, 0.08);
+}
+
+html[data-theme="dark"] {
+  --ios-segment-track: color-mix(in srgb, var(--surface-soft) 92%, #10151d);
+  --ios-segment-thumb-top: rgba(54, 62, 75, 0.98);
+  --ios-segment-thumb-bottom: rgba(41, 48, 60, 0.98);
+  --ios-segment-thumb-border: rgba(255, 255, 255, 0.09);
+  --ios-segment-shadow: 0 1px 2px rgba(0, 0, 0, 0.34), 0 5px 16px rgba(0, 0, 0, 0.26);
+}
+
+.mode-switch,
+.reading-size-control,
+.memory-toggle-group,
+.ios-timer-segment {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--ios-segment-track) !important;
+}
+
+.mode-switch::before,
+.reading-size-control::before,
+.memory-toggle-group::before,
+.ios-timer-segment::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: 0;
+  width: var(--ios-thumb-width, 0px);
+  height: var(--ios-thumb-height, 0px);
+  border: 1px solid var(--ios-segment-thumb-border);
+  border-radius: 9px;
+  background: linear-gradient(180deg, var(--ios-segment-thumb-top), var(--ios-segment-thumb-bottom));
+  box-shadow: var(--ios-segment-shadow);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(var(--ios-thumb-x, 0px), var(--ios-thumb-y, 0px), 0);
+  transition:
+    transform 330ms cubic-bezier(.32, .72, 0, 1),
+    width 330ms cubic-bezier(.32, .72, 0, 1),
+    height 330ms cubic-bezier(.32, .72, 0, 1),
+    opacity 150ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease;
+  will-change: transform, width;
+}
+
+.mode-switch.ios-segment-ready::before,
+.reading-size-control.ios-segment-ready::before,
+.memory-toggle-group.ios-segment-ready::before,
+.ios-timer-segment.ios-segment-ready::before {
+  opacity: 1;
+}
+
+.mode-switch > *,
+.reading-size-control > *,
+.memory-toggle-group > *,
+.ios-timer-segment > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* The thumb owns the selected surface now; active buttons stay transparent. */
+.mode-button,
+.reading-size-button,
+.memory-toggle-button,
+.ios-timer-segment .timer-setting-button {
+  background: transparent !important;
+  box-shadow: none !important;
+  transition:
+    color 220ms ease,
+    opacity 220ms ease,
+    transform 140ms ease !important;
+}
+
+.mode-button.is-active,
+.reading-size-button.is-active,
+.memory-toggle-button.is-active,
+.ios-timer-segment .timer-setting-button.is-active {
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--accent-ink) !important;
+}
+
+.mode-button:active,
+.reading-size-button:active,
+.memory-toggle-button:active,
+.ios-timer-segment .timer-setting-button:active {
+  transform: scale(.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mode-switch::before,
+  .reading-size-control::before,
+  .memory-toggle-group::before,
+  .ios-timer-segment::before {
+    transition: opacity 120ms ease !important;
+  }
+}
