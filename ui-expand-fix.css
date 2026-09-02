@@ -1,0 +1,22 @@
+/* Keep the top-right expand/collapse control visually centered and stateful. */
+#expandAllButton {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+}
+
+#expandAllButton svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex: 0 0 20px;
+  transform-origin: 50% 50%;
+}
+
+#expandAllButton[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
