@@ -1,23 +1,14 @@
 # Automatic asset cache busting
 
-GitHub Pages is built from `main` by `.github/workflows/deploy-pages.yml`.
+GitHub Pages is published directly from the `main` branch using GitHub's built-in Jekyll Pages pipeline.
 
-During deployment, `scripts/build-pages.py` copies the static site to `dist/` and rewrites every local CSS/JS reference that uses `?v=...` to the first 12 characters of the deployment commit SHA.
+`index.html` and `bootstrap.js` include YAML front matter so Jekyll processes them during the Pages build. They both use GitHub Pages' current build revision as a shared asset version.
 
-Example source:
+As a result, deployed local CSS and JavaScript URLs receive the current commit SHA as their `v` query value. The same revision is also applied to the local dynamic imports loaded by `bootstrap.js`.
 
-```html
-<link rel="stylesheet" href="library.css?v=1">
-<script type="module" src="bootstrap.js?v=3"></script>
-```
+This means:
 
-Example deployed artifact for commit `abcdef123456...`:
-
-```html
-<link rel="stylesheet" href="library.css?v=abcdef123456">
-<script type="module" src="bootstrap.js?v=abcdef123456"></script>
-```
-
-Dynamic imports such as `import('./app.js?v=6')` are rewritten the same way.
-
-This means developers no longer need to bump asset versions manually when CSS or JavaScript changes.
+- CSS and JavaScript versions change automatically on every deployment.
+- Manual `v=1`, `v=2`, and similar version bumps are no longer needed.
+- The site uses only the built-in GitHub Pages deployment, so there is no second custom Pages workflow competing for the deployment slot.
+- External URLs such as the Supabase CDN import are never rewritten.
