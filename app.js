@@ -135,6 +135,17 @@
   function applyTheme(theme) { document.documentElement.dataset.theme = theme; localStorage.setItem('interview-theme', theme); }
   function initTheme() { const saved = localStorage.getItem('interview-theme'); if (saved === 'light' || saved === 'dark') return applyTheme(saved); applyTheme(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
 
+  function updateExpandAllButton() {
+    const icon = expandAllButton.querySelector('svg');
+    if (icon) {
+      icon.style.transition = 'transform .2s ease';
+      icon.style.transform = allExpanded ? 'rotate(180deg)' : 'rotate(0deg)';
+    }
+    expandAllButton.setAttribute('aria-pressed', String(allExpanded));
+    expandAllButton.setAttribute('aria-label', allExpanded ? 'すべて閉じる' : 'すべて開く');
+    expandAllButton.setAttribute('title', allExpanded ? 'すべて閉じる' : 'すべて開く');
+  }
+
   searchInput.addEventListener('input', event => { currentQuery = event.target.value; activeCategory = 'all'; activeSuggestion = -1; renderQuestions(); renderSuggestions(); });
   searchInput.addEventListener('keydown', event => {
     const buttons = [...suggestions.querySelectorAll('[data-suggestion-id]')];
@@ -149,9 +160,16 @@
   questionSections.addEventListener('click', event => { const button = event.target.closest('[data-speech-id]'); if (!button) return; event.preventDefault(); event.stopPropagation(); const item = data.find(entry => entry.id === Number(button.dataset.speechId)); if (item) speak(item, button); });
   clearSearchButton.addEventListener('click', () => { searchInput.value = ''; currentQuery = ''; activeCategory = 'all'; renderQuestions(); searchInput.focus(); });
   themeButton.addEventListener('click', () => { const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; applyTheme(next); showToast(next === 'dark' ? '夜間モードに切り替えました' : '昼間モードに切り替えました'); });
-  expandAllButton.addEventListener('click', () => { allExpanded = !allExpanded; document.querySelectorAll('.qa-card').forEach(card => { card.open = allExpanded; }); expandAllButton.setAttribute('aria-label', allExpanded ? 'すべて閉じる' : 'すべて開く'); expandAllButton.setAttribute('title', allExpanded ? 'すべて閉じる' : 'すべて開く'); });
+  expandAllButton.addEventListener('click', () => {
+    allExpanded = !allExpanded;
+    document.querySelectorAll('.qa-card').forEach(card => { card.open = allExpanded; });
+    updateExpandAllButton();
+    showToast(allExpanded ? 'すべての回答を開きました' : 'すべての回答を閉じました');
+  });
   document.addEventListener('click', event => { if (!event.target.closest('.search')) suggestions.hidden = true; });
   document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); searchInput.focus(); searchInput.select(); } });
   window.addEventListener('beforeunload', stopSpeech);
-  initTheme(); renderQuestions();
+  initTheme();
+  updateExpandAllButton();
+  renderQuestions();
 })();
