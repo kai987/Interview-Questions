@@ -4,8 +4,16 @@
 .control-field {
   display: inline-flex;
   align-items: center;
-  gap: 16px;
   min-width: 0;
+}
+
+.labeled-segment-control,
+.memory-setting-row {
+  gap: 16px;
+}
+
+.control-field {
+  gap: 8px;
 }
 
 .segment-control-label,
@@ -33,7 +41,6 @@
 .study-memory-controls {
   align-items: center;
   gap: 18px;
-  margin-right: 8px;
 }
 
 .timer-segment-control {
@@ -57,7 +64,6 @@
 @media (max-width: 860px) {
   .study-memory-controls {
     align-items: stretch;
-    margin-right: 0;
   }
 
   .memory-setting-row,
