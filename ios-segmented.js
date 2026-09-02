@@ -1,6 +1,7 @@
 (() => {
   const groupSelector = '.mode-switch, .reading-size-control, .memory-toggle-group, .ios-timer-segment';
-  const buttonSelector = '.mode-button.is-active, .reading-size-button.is-active, .memory-toggle-button.is-active, .timer-setting-button.is-active';
+  const clickableSelector = '.mode-button, .reading-size-button, .memory-toggle-button, .timer-setting-button';
+  const activeSelector = '.mode-button.is-active, .reading-size-button.is-active, .memory-toggle-button.is-active, .timer-setting-button.is-active';
 
   function markTimerGroups() {
     document.querySelectorAll('.timer-setting-button').forEach(button => {
@@ -20,30 +21,30 @@
     return thumb;
   }
 
-  function syncGroup(group, immediate = false) {
-    const active = group.querySelector(buttonSelector);
+  function moveThumbTo(group, target, immediate = false) {
+    if (!group || !target || !group.contains(target)) return;
     const thumb = ensureThumb(group);
-
-    if (!active || !group.contains(active)) {
-      group.classList.remove('ios-segment-ready');
-      return;
-    }
-
-    const x = active.offsetLeft;
-    const y = active.offsetTop;
-    const width = active.offsetWidth;
-    const height = active.offsetHeight;
 
     if (immediate) thumb.classList.add('is-immediate');
 
-    thumb.style.width = `${width}px`;
-    thumb.style.height = `${height}px`;
-    thumb.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+    thumb.style.left = `${target.offsetLeft}px`;
+    thumb.style.top = `${target.offsetTop}px`;
+    thumb.style.width = `${target.offsetWidth}px`;
+    thumb.style.height = `${target.offsetHeight}px`;
     group.classList.add('ios-segment-ready');
 
     if (immediate) {
       requestAnimationFrame(() => thumb.classList.remove('is-immediate'));
     }
+  }
+
+  function syncGroup(group, immediate = false) {
+    const active = group.querySelector(activeSelector);
+    if (!active) {
+      group.classList.remove('ios-segment-ready');
+      return;
+    }
+    moveThumbTo(group, active, immediate);
   }
 
   function syncAll(immediate = false) {
@@ -57,18 +58,24 @@
     frame = requestAnimationFrame(() => syncAll(false));
   }
 
+  // Move immediately to the clicked option. This does not depend on when
+  // the owning script updates .is-active, so the visual slide is guaranteed.
   document.addEventListener('click', event => {
-    if (!event.target.closest('.mode-button, .reading-size-button, .memory-toggle-button, .timer-setting-button')) return;
+    const button = event.target.closest(clickableSelector);
+    if (!button) return;
+
+    markTimerGroups();
+    const group = button.closest(groupSelector);
+    if (group) moveThumbTo(group, button, false);
+
+    // Reconcile with the actual application state after all click handlers run.
     requestAnimationFrame(() => requestAnimationFrame(scheduleSync));
   }, true);
 
   const observer = new MutationObserver(mutations => {
     const needsSync = mutations.some(mutation => {
       if (mutation.type === 'childList') return true;
-      if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-        return mutation.target.matches?.('.mode-button, .reading-size-button, .memory-toggle-button, .timer-setting-button');
-      }
-      return false;
+      return mutation.type === 'attributes' && mutation.attributeName === 'class' && mutation.target.matches?.(clickableSelector);
     });
     if (needsSync) scheduleSync();
   });
@@ -81,8 +88,15 @@
 
   if ('ResizeObserver' in window) {
     const resizeObserver = new ResizeObserver(scheduleSync);
+    const observed = new WeakSet();
     const observeGroups = () => {
-      document.querySelectorAll(groupSelector).forEach(group => resizeObserver.observe(group));
+      markTimerGroups();
+      document.querySelectorAll(groupSelector).forEach(group => {
+        if (!observed.has(group)) {
+          resizeObserver.observe(group);
+          observed.add(group);
+        }
+      });
     };
     observeGroups();
     const groupObserver = new MutationObserver(observeGroups);
