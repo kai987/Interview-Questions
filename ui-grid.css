@@ -84,6 +84,10 @@
     width: calc(100% - var(--shell-gutter));
   }
 
+  .search input {
+    padding-right: 16px;
+  }
+
   .study-tools-wrap {
     margin-top: 12px;
   }
