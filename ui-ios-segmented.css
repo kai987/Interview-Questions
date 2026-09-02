@@ -1,16 +1,16 @@
-/* iOS-like segmented controls: one shared sliding thumb per control group. */
+/* iOS-like segmented controls with a real sliding thumb element. */
 :root {
   --ios-segment-track: color-mix(in srgb, var(--surface-soft) 88%, #dfe5ee);
-  --ios-segment-thumb-top: rgba(255, 255, 255, 0.98);
-  --ios-segment-thumb-bottom: rgba(250, 251, 253, 0.94);
+  --ios-segment-thumb-top: rgba(255, 255, 255, 0.99);
+  --ios-segment-thumb-bottom: rgba(247, 249, 252, 0.96);
   --ios-segment-thumb-border: rgba(120, 135, 158, 0.16);
   --ios-segment-shadow: 0 1px 2px rgba(19, 32, 54, 0.10), 0 5px 14px rgba(19, 32, 54, 0.08);
 }
 
 html[data-theme="dark"] {
   --ios-segment-track: color-mix(in srgb, var(--surface-soft) 92%, #10151d);
-  --ios-segment-thumb-top: rgba(54, 62, 75, 0.98);
-  --ios-segment-thumb-bottom: rgba(41, 48, 60, 0.98);
+  --ios-segment-thumb-top: rgba(56, 64, 78, 0.99);
+  --ios-segment-thumb-bottom: rgba(40, 47, 59, 0.98);
   --ios-segment-thumb-border: rgba(255, 255, 255, 0.09);
   --ios-segment-shadow: 0 1px 2px rgba(0, 0, 0, 0.34), 0 5px 16px rgba(0, 0, 0, 0.26);
 }
@@ -25,24 +25,21 @@ html[data-theme="dark"] {
   background: var(--ios-segment-track) !important;
 }
 
-.mode-switch::before,
-.reading-size-control::before,
-.memory-toggle-group::before,
-.ios-timer-segment::before {
-  content: "";
-  position: absolute;
-  z-index: 0;
+.ios-segment-thumb {
+  position: absolute !important;
+  z-index: 0 !important;
   left: 0;
   top: 0;
-  width: var(--ios-thumb-width, 0px);
-  height: var(--ios-thumb-height, 0px);
+  display: block;
+  width: 0;
+  height: 0;
   border: 1px solid var(--ios-segment-thumb-border);
   border-radius: 9px;
   background: linear-gradient(180deg, var(--ios-segment-thumb-top), var(--ios-segment-thumb-bottom));
   box-shadow: var(--ios-segment-shadow);
   opacity: 0;
   pointer-events: none;
-  transform: translate3d(var(--ios-thumb-x, 0px), var(--ios-thumb-y, 0px), 0);
+  transform: translate3d(0, 0, 0);
   transition:
     transform 330ms cubic-bezier(.32, .72, 0, 1),
     width 330ms cubic-bezier(.32, .72, 0, 1),
@@ -50,25 +47,26 @@ html[data-theme="dark"] {
     opacity 150ms ease,
     background 220ms ease,
     box-shadow 220ms ease;
-  will-change: transform, width;
+  will-change: transform, width, height;
 }
 
-.mode-switch.ios-segment-ready::before,
-.reading-size-control.ios-segment-ready::before,
-.memory-toggle-group.ios-segment-ready::before,
-.ios-timer-segment.ios-segment-ready::before {
+.ios-segment-thumb.is-immediate {
+  transition: none !important;
+}
+
+.ios-segment-ready > .ios-segment-thumb {
   opacity: 1;
 }
 
-.mode-switch > *,
-.reading-size-control > *,
-.memory-toggle-group > *,
-.ios-timer-segment > * {
+.mode-switch > :not(.ios-segment-thumb),
+.reading-size-control > :not(.ios-segment-thumb),
+.memory-toggle-group > :not(.ios-segment-thumb),
+.ios-timer-segment > :not(.ios-segment-thumb) {
   position: relative;
   z-index: 1;
 }
 
-/* The thumb owns the selected surface now; active buttons stay transparent. */
+/* The thumb owns the selected surface; active buttons stay transparent. */
 .mode-button,
 .reading-size-button,
 .memory-toggle-button,
@@ -98,10 +96,7 @@ html[data-theme="dark"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mode-switch::before,
-  .reading-size-control::before,
-  .memory-toggle-group::before,
-  .ios-timer-segment::before {
+  .ios-segment-thumb {
     transition: opacity 120ms ease !important;
   }
 }
