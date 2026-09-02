@@ -33,8 +33,10 @@
   margin-top: 8px;
 }
 
+/* Give the category panel a little more room while keeping it close to content. */
 .layout {
-  gap: 40px;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 28px;
   padding-top: 32px;
   padding-bottom: 72px;
 }
@@ -59,8 +61,15 @@
   }
 
   .layout {
-    gap: 32px;
+    grid-template-columns: 250px minmax(0, 1fr);
+    gap: 24px;
     padding-top: 28px;
+  }
+}
+
+@media (max-width: 860px) {
+  .layout {
+    grid-template-columns: 1fr;
   }
 }
 
