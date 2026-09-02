@@ -90,8 +90,8 @@ html[data-theme="dark"] {
   font-weight: 750;
 }
 .reading-size-button {
-  width: 40px;
-  height: 38px;
+  width: 38px;
+  height: 36px;
   border-radius: 8px;
   font-size: 15px;
 }
@@ -181,7 +181,7 @@ html[data-theme="dark"] {
   display: flex;
   padding: 14px 65px 24px;
   margin-top: 2px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-top: 0;
 }
 .practice-reveal-button {
   min-height: 44px;
@@ -229,7 +229,7 @@ html[data-reading-size="large"] .answer-text { font-size: 23px; line-height: 2; 
   .qa-card summary { grid-template-columns: 40px minmax(0, 1fr) 30px; }
   .qa-state-actions {
     grid-column: 2 / 4;
-    padding-top: 5px;
+    padding-top: 2px;
     justify-content: flex-start;
   }
   .qa-chevron { grid-column: 3; grid-row: 1; }
@@ -242,7 +242,7 @@ html[data-reading-size="large"] .answer-text { font-size: 23px; line-height: 2; 
   .state-button {
     width: 42px;
     min-width: 42px;
-    height: 42px;
+    height: 40px;
     padding: 0;
     justify-content: center;
   }
@@ -252,19 +252,16 @@ html[data-reading-size="large"] .answer-text { font-size: 23px; line-height: 2; 
     flex-basis: 24px;
     font-size: 22px;
   }
-  .practiced-button > span:first-child { font-size: 19px; }
-  .practice-mode .practice-reveal {
-    padding: 14px 0 22px;
-    margin: 0 0 0 51px;
-  }
+  .practiced-button > span:first-child { font-size: 20px; }
+  .practice-mode .practice-reveal { padding: 14px 0 20px; }
 
-  html[data-reading-size="small"] .qa-question strong { font-size: 18px; }
-  html[data-reading-size="small"] .qa-question small { font-size: 14px; }
-  html[data-reading-size="small"] .answer-text { font-size: 16px; line-height: 1.82; }
+  html[data-reading-size="small"] .qa-question strong { font-size: 17px; }
+  html[data-reading-size="small"] .qa-question small { font-size: 13px; }
+  html[data-reading-size="small"] .answer-text { font-size: 15px; line-height: 1.82; }
   html[data-reading-size="medium"] .qa-question strong { font-size: 20px; }
   html[data-reading-size="medium"] .qa-question small { font-size: 15px; }
-  html[data-reading-size="medium"] .answer-text { font-size: 18px; line-height: 1.88; }
+  html[data-reading-size="medium"] .answer-text { font-size: 18px; line-height: 1.9; }
   html[data-reading-size="large"] .qa-question strong { font-size: 23px; }
   html[data-reading-size="large"] .qa-question small { font-size: 17px; }
-  html[data-reading-size="large"] .answer-text { font-size: 21px; line-height: 1.95; }
+  html[data-reading-size="large"] .answer-text { font-size: 21px; line-height: 1.96; }
 }
