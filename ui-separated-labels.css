@@ -1,14 +1,16 @@
 /* Keep labels outside segmented controls, matching the answer-time layout. */
 .labeled-segment-control,
-.memory-setting-row {
+.memory-setting-row,
+.control-field {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 16px;
   min-width: 0;
 }
 
 .segment-control-label,
-.memory-toggle-label {
+.memory-toggle-label,
+.control-field__label {
   flex: 0 0 auto;
   padding: 0 !important;
   color: var(--muted);
@@ -59,13 +61,15 @@
   }
 
   .memory-setting-row,
-  .labeled-segment-control {
+  .labeled-segment-control,
+  .control-field {
     justify-content: space-between;
   }
 }
 
 @media (max-width: 520px) {
-  .memory-setting-row {
+  .memory-setting-row,
+  .control-field {
     width: 100%;
   }
 
@@ -78,7 +82,8 @@
   }
 
   .segment-control-label,
-  .memory-toggle-label {
+  .memory-toggle-label,
+  .control-field__label {
     font-size: 12px;
   }
 }
