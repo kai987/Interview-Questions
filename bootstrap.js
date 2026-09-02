@@ -359,11 +359,15 @@ try {
 }
 
 supabase.auth.onAuthStateChange((event, nextSession) => {
+  const wasSignedIn = Boolean(session?.user?.id);
   session = nextSession;
   updateAuthButton();
   if (!bootComplete) return;
-  if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
-    if (event === 'SIGNED_OUT') clearPrivateLocalState();
+
+  // Supabase may emit SIGNED_IN again for an already authenticated session
+  // when the browser tab becomes active. Do not reload for that repeated event.
+  if (event === 'SIGNED_OUT' && wasSignedIn) {
+    clearPrivateLocalState();
     window.location.reload();
   }
 });
