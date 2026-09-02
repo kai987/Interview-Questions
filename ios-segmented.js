@@ -1,12 +1,27 @@
 (() => {
-  const groupSelector = '.mode-switch, .reading-size-control, .memory-toggle-group, .ios-timer-segment';
+  const groupSelector = '.mode-switch, .reading-size-control, .memory-toggle-group, .timer-segment-control';
   const clickableSelector = '.mode-button, .reading-size-button, .memory-toggle-button, .timer-setting-button';
   const activeSelector = '.mode-button.is-active, .reading-size-button.is-active, .memory-toggle-button.is-active, .timer-setting-button.is-active';
 
-  function markTimerGroups() {
+  function setupTimerGroups() {
     document.querySelectorAll('.timer-setting-button').forEach(button => {
-      const group = button.closest('.training-tools__group');
-      if (group) group.classList.add('ios-timer-segment');
+      const outerGroup = button.closest('.training-tools__group');
+      if (!outerGroup) return;
+
+      let segment = outerGroup.querySelector(':scope > .timer-segment-control');
+      if (!segment) {
+        segment = document.createElement('div');
+        segment.className = 'timer-segment-control';
+        segment.setAttribute('role', 'group');
+        segment.setAttribute('aria-label', '回答時間');
+
+        const timerButtons = [...outerGroup.querySelectorAll(':scope > .timer-setting-button')];
+        timerButtons.forEach(timerButton => segment.appendChild(timerButton));
+        outerGroup.appendChild(segment);
+      }
+
+      outerGroup.classList.remove('ios-timer-segment');
+      outerGroup.querySelectorAll(':scope > .ios-segment-thumb').forEach(node => node.remove());
     });
   }
 
@@ -48,7 +63,7 @@
   }
 
   function syncAll(immediate = false) {
-    markTimerGroups();
+    setupTimerGroups();
     document.querySelectorAll(groupSelector).forEach(group => syncGroup(group, immediate));
   }
 
@@ -58,17 +73,14 @@
     frame = requestAnimationFrame(() => syncAll(false));
   }
 
-  // Move immediately to the clicked option. This does not depend on when
-  // the owning script updates .is-active, so the visual slide is guaranteed.
   document.addEventListener('click', event => {
     const button = event.target.closest(clickableSelector);
     if (!button) return;
 
-    markTimerGroups();
+    setupTimerGroups();
     const group = button.closest(groupSelector);
     if (group) moveThumbTo(group, button, false);
 
-    // Reconcile with the actual application state after all click handlers run.
     requestAnimationFrame(() => requestAnimationFrame(scheduleSync));
   }, true);
 
@@ -90,7 +102,7 @@
     const resizeObserver = new ResizeObserver(scheduleSync);
     const observed = new WeakSet();
     const observeGroups = () => {
-      markTimerGroups();
+      setupTimerGroups();
       document.querySelectorAll(groupSelector).forEach(group => {
         if (!observed.has(group)) {
           resizeObserver.observe(group);
