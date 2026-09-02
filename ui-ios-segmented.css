@@ -18,11 +18,20 @@ html[data-theme="dark"] {
 .mode-switch,
 .reading-size-control,
 .memory-toggle-group,
-.ios-timer-segment {
+.timer-segment-control {
   position: relative;
   isolation: isolate;
   overflow: hidden;
   background: var(--ios-segment-track) !important;
+}
+
+.timer-segment-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
 }
 
 .ios-segment-thumb {
@@ -61,7 +70,7 @@ html[data-theme="dark"] {
 .mode-switch > :not(.ios-segment-thumb),
 .reading-size-control > :not(.ios-segment-thumb),
 .memory-toggle-group > :not(.ios-segment-thumb),
-.ios-timer-segment > :not(.ios-segment-thumb) {
+.timer-segment-control > :not(.ios-segment-thumb) {
   position: relative;
   z-index: 1;
 }
@@ -70,7 +79,7 @@ html[data-theme="dark"] {
 .mode-button,
 .reading-size-button,
 .memory-toggle-button,
-.ios-timer-segment .timer-setting-button {
+.timer-segment-control .timer-setting-button {
   background: transparent !important;
   box-shadow: none !important;
   transition:
@@ -79,10 +88,18 @@ html[data-theme="dark"] {
     transform 140ms ease !important;
 }
 
+.timer-segment-control .timer-setting-button {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 0 !important;
+  border-radius: 8px;
+  color: var(--muted);
+}
+
 .mode-button.is-active,
 .reading-size-button.is-active,
 .memory-toggle-button.is-active,
-.ios-timer-segment .timer-setting-button.is-active {
+.timer-segment-control .timer-setting-button.is-active {
   background: transparent !important;
   box-shadow: none !important;
   color: var(--accent-ink) !important;
@@ -91,7 +108,7 @@ html[data-theme="dark"] {
 .mode-button:active,
 .reading-size-button:active,
 .memory-toggle-button:active,
-.ios-timer-segment .timer-setting-button:active {
+.timer-segment-control .timer-setting-button:active {
   transform: scale(.97);
 }
 
