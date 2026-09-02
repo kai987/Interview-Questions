@@ -1,0 +1,82 @@
+/* Keep labels outside segmented controls, matching the answer-time layout. */
+.labeled-segment-control,
+.memory-setting-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.segment-control-label,
+.memory-toggle-label {
+  flex: 0 0 auto;
+  padding: 0 !important;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* The track itself now contains buttons only. */
+.reading-size-control,
+.memory-toggle-group,
+.timer-segment-control {
+  flex: 0 0 auto;
+}
+
+.reading-size-control {
+  padding: 4px;
+}
+
+.study-memory-controls {
+  align-items: center;
+  gap: 18px;
+}
+
+.timer-segment-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.timer-segment-control .timer-setting-button {
+  min-width: 58px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0 !important;
+  border-radius: 8px;
+}
+
+@media (max-width: 860px) {
+  .study-memory-controls {
+    align-items: stretch;
+  }
+
+  .memory-setting-row,
+  .labeled-segment-control {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 520px) {
+  .memory-setting-row {
+    width: 100%;
+  }
+
+  .memory-toggle-group {
+    flex: 1;
+  }
+
+  .memory-toggle-button {
+    flex: 1;
+  }
+
+  .segment-control-label,
+  .memory-toggle-label {
+    font-size: 12px;
+  }
+}
