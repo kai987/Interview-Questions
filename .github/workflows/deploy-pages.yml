@@ -29,6 +29,9 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
         run: python3 scripts/build-pages.py
 
+      - name: Verify generated asset versions
+        run: python3 scripts/verify-pages-build.py
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
