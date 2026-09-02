@@ -1,3 +1,6 @@
+---
+---
+{% assign asset_version = site.github.build_revision | default: 'dev' %}
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4/+esm';
 
 const SUPABASE_URL = 'https://flpmblfscgcbrprwwckz.supabase.co';
@@ -372,13 +375,13 @@ supabase.auth.onAuthStateChange((event, nextSession) => {
   }
 });
 
-await import('./app.js?v=6');
-await import('./training.js?v=2');
-await import('./study-hints.js?v=2');
-await import('./separate-control-labels.js?v=1');
-await import('./expand-practice-fix.js?v=1');
-await import('./ios-segmented.js?v=4');
-await import('./privacy-ui.js?v=1');
+await import('./app.js?v={{ asset_version }}');
+await import('./training.js?v={{ asset_version }}');
+await import('./study-hints.js?v={{ asset_version }}');
+await import('./separate-control-labels.js?v={{ asset_version }}');
+await import('./expand-practice-fix.js?v={{ asset_version }}');
+await import('./ios-segmented.js?v={{ asset_version }}');
+await import('./privacy-ui.js?v={{ asset_version }}');
 
 bootComplete = true;
 document.body.classList.toggle('private-mode-unlocked', Boolean(session));
