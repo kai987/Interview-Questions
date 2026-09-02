@@ -1,5 +1,5 @@
 .interview-library-wrap {
-  width: min(var(--content), calc(100% - 40px));
+  width: min(var(--shell-width), calc(100% - var(--shell-gutter)));
   margin: 18px auto 0;
 }
 
@@ -97,9 +97,6 @@
 }
 
 @media (max-width: 520px) {
-  .interview-library-wrap {
-    width: min(var(--content), calc(100% - 28px));
-  }
   .interview-library__picker {
     align-items: stretch;
     flex-direction: column;
