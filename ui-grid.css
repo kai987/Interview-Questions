@@ -1,0 +1,46 @@
+:root {
+  --shell-width: 1440px;
+  --shell-gutter: 48px;
+}
+
+/* One shared horizontal grid for the entire page. */
+.topbar__inner,
+.hero__content,
+.study-tools-wrap,
+.layout {
+  width: min(var(--shell-width), calc(100% - var(--shell-gutter)));
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Keep the compact hero using the same outer edges as the tools and content. */
+.hero__content {
+  max-width: none;
+}
+
+/* The top bar should align its logo and action buttons with the page body. */
+.topbar__inner {
+  max-width: none;
+}
+
+@media (max-width: 1050px) {
+  :root { --shell-gutter: 40px; }
+
+  .topbar__inner,
+  .hero__content,
+  .study-tools-wrap,
+  .layout {
+    width: calc(100% - var(--shell-gutter));
+  }
+}
+
+@media (max-width: 720px) {
+  :root { --shell-gutter: 28px; }
+
+  .topbar__inner,
+  .hero__content,
+  .study-tools-wrap,
+  .layout {
+    width: calc(100% - var(--shell-gutter));
+  }
+}
