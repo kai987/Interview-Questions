@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="面接対策用の質問・回答練習サイト。個人向け回答はログイン後のみ表示。" />
+  <meta name="description" content="面接対策用の質問・回答練習サイト。題庫はSupabaseから読み込み、個人向け回答はログイン後のみ表示。" />
   <meta name="robots" content="noindex,nofollow,noarchive" />
   <meta name="referrer" content="no-referrer" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://flpmblfscgcbrprwwckz.supabase.co wss://flpmblfscgcbrprwwckz.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests" />
@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="ui-ios-segmented.css?v=4" />
   <link rel="stylesheet" href="ui-separated-labels.css?v=1" />
   <link rel="stylesheet" href="auth.css?v=1" />
+  <link rel="stylesheet" href="library.css?v=1" />
 </head>
 <body>
   <a class="skip-link" href="#questions">質問一覧へ移動</a>
@@ -29,7 +30,7 @@
         <span class="brand__mark" aria-hidden="true">IQ</span>
         <span>
           <strong>Interview Questions</strong>
-          <small>AI社内SE 面接対策</small>
+          <small>面接題庫・練習</small>
         </span>
       </a>
 
@@ -51,12 +52,28 @@
   <main id="top">
     <section class="hero">
       <div class="hero__content">
-        <p class="hero__company">テンフィールズファクトリー株式会社｜京都｜AI社内SE</p>
+        <p class="hero__company" id="heroCompany">Interview Library｜題庫を読み込み中</p>
         <h1>面接で「話せる」状態にするための質問集</h1>
-        <p class="hero__lead">React / TypeScript の実務経験と、大学院での Python・AI 学習を自然につなげる回答例を、面接の流れに沿って整理しています。</p>
-        <div class="hero__meta" aria-label="コンテンツ概要"><span><strong id="questionCount">0</strong> 質問</span><span>日本語回答例</span><span>音声読み上げ対応</span><span>個人回答はログイン保護</span></div>
+        <p class="hero__lead">会社・職種ごとに質問を整理し、ログイン後は個人向け回答例・キーワード・学習状況を安全に読み込みます。</p>
+        <div class="hero__meta" aria-label="コンテンツ概要"><span><strong id="questionCount">0</strong> 質問</span><span>題庫はDB管理</span><span>音声読み上げ対応</span><span>個人回答はログイン保護</span></div>
       </div>
     </section>
+
+    <div class="interview-library-wrap">
+      <div class="interview-library" aria-label="面接題庫">
+        <div class="interview-library__identity">
+          <span class="interview-library__eyebrow">Interview Library</span>
+          <strong class="interview-library__title" id="activeSetTitle">題庫を読み込み中…</strong>
+          <span class="interview-library__meta" id="activeSetMeta">Supabaseに接続しています</span>
+        </div>
+        <label class="interview-library__picker" for="interviewSetSelect">
+          <span>題庫を切り替える</span>
+          <select class="interview-library__select" id="interviewSetSelect" disabled>
+            <option>読み込み中…</option>
+          </select>
+        </label>
+      </div>
+    </div>
 
     <div class="study-tools-wrap">
       <div class="study-tools" aria-label="学習表示設定">
@@ -101,7 +118,7 @@
     <div class="layout">
       <aside class="sidebar" aria-label="カテゴリ"><div class="sidebar__sticky"><p class="sidebar__title">カテゴリ</p><nav id="categoryNav"></nav><div class="practice-note"><strong>練習のコツ</strong><p>回答を丸暗記せず、「結論 → 具体例 → この会社でどう活かすか」の3点だけ覚えると自然に話せます。</p></div></div></aside>
       <section class="content" id="questions" aria-live="polite">
-        <div class="content__header"><div><p class="content__label">INTERVIEW PREP</p><h2>質問と回答例</h2></div><p id="resultSummary">すべての質問を表示しています</p></div>
+        <div class="content__header"><div><p class="content__label">INTERVIEW PREP</p><h2>質問と回答例</h2></div><p id="resultSummary">題庫を読み込んでいます</p></div>
         <div id="questionSections"></div>
         <div id="emptyState" class="empty-state" hidden><h3>該当する質問が見つかりません</h3><p>別のキーワードで検索してください。</p><button id="clearSearchButton" class="secondary-button" type="button">検索をクリア</button></div>
       </section>
@@ -114,7 +131,7 @@
         <h2 id="authDialogTitle">プライベートモード</h2>
         <button class="auth-dialog__close" id="authCloseButton" type="button" aria-label="閉じる">×</button>
       </div>
-      <p class="auth-dialog__lead">登録済みユーザーだけが、個人経歴・学校・在留資格・希望給与などを含む回答例を読み込めます。新規ユーザーの自動登録は無効です。</p>
+      <p class="auth-dialog__lead">登録済みユーザーだけが、個人経歴・学校・在留資格・希望給与などを含む回答例と非公開題庫を読み込めます。新規ユーザーの自動登録は無効です。</p>
       <div class="auth-field">
         <label for="authEmail">メールアドレス</label>
         <input id="authEmail" type="email" autocomplete="email" inputmode="email" />
@@ -133,10 +150,9 @@
     </div>
   </dialog>
 
-  <footer><p>Interview Questions · AI社内SE 面接対策</p></footer>
+  <footer><p>Interview Questions · 面接題庫</p></footer>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="data-public.js?v=1"></script>
-  <script type="module" src="bootstrap.js?v=1"></script>
+  <script type="module" src="bootstrap.js?v=2"></script>
 </body>
 </html>
