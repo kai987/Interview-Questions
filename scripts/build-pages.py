@@ -29,9 +29,19 @@ for src in ROOT.rglob("*"):
 
 asset_version_re = re.compile(r"((?:\./)?[^'\"\s)>]+\.(?:css|js))(?:\?v=[^'\"\s)>]+)?")
 
+
+def version_local_asset(match: re.Match) -> str:
+    asset = match.group(1)
+    # Only cache-bust local assets. External URLs such as
+    # https://cdn.jsdelivr.net/... must remain byte-for-byte unchanged.
+    if "://" in asset or asset.startswith("//"):
+        return match.group(0)
+    return f"{asset}?v={SHA}"
+
+
 for path in list(DIST.rglob("*.html")) + list(DIST.rglob("*.js")):
     text = path.read_text(encoding="utf-8")
-    text = asset_version_re.sub(lambda m: f"{m.group(1)}?v={SHA}", text)
+    text = asset_version_re.sub(version_local_asset, text)
     path.write_text(text, encoding="utf-8")
 
 (DIST / ".nojekyll").write_text("", encoding="utf-8")
