@@ -24,6 +24,29 @@
   max-width: none;
 }
 
+/* Compact vertical rhythm between the page's major modules. */
+.study-tools-wrap {
+  margin-top: 14px;
+}
+
+.training-tools {
+  margin-top: 8px;
+}
+
+.layout {
+  gap: 40px;
+  padding-top: 32px;
+  padding-bottom: 72px;
+}
+
+.content__header {
+  margin-bottom: 24px;
+}
+
+.category-section {
+  margin-bottom: 44px;
+}
+
 @media (max-width: 1050px) {
   :root { --shell-gutter: 40px; }
 
@@ -33,6 +56,11 @@
   .study-tools-wrap,
   .layout {
     width: calc(100% - var(--shell-gutter));
+  }
+
+  .layout {
+    gap: 32px;
+    padding-top: 28px;
   }
 }
 
@@ -45,5 +73,23 @@
   .study-tools-wrap,
   .layout {
     width: calc(100% - var(--shell-gutter));
+  }
+
+  .study-tools-wrap {
+    margin-top: 12px;
+  }
+
+  .layout {
+    gap: 24px;
+    padding-top: 22px;
+    padding-bottom: 54px;
+  }
+
+  .content__header {
+    margin-bottom: 18px;
+  }
+
+  .category-section {
+    margin-bottom: 32px;
   }
 }
