@@ -1,6 +1,5 @@
 .interview-library-wrap {
-  width: min(var(--shell-width), calc(100% - var(--shell-gutter)));
-  margin: 18px auto 0;
+  margin-top: 18px;
 }
 
 .interview-library {
