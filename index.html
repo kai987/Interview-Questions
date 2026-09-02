@@ -3,8 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="AI社内SE 面接対策。質問・回答例、検索、音声読み上げ、昼夜モード。" />
-  <title>AI社内SE 面接対策｜Interview Questions</title>
+  <meta name="description" content="面接対策用の質問・回答練習サイト。個人向け回答はログイン後のみ表示。" />
+  <meta name="robots" content="noindex,nofollow,noarchive" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://flpmblfscgcbrprwwckz.supabase.co wss://flpmblfscgcbrprwwckz.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests" />
+  <title>Interview Questions</title>
   <link rel="stylesheet" href="styles.css?v=5" />
   <link rel="stylesheet" href="ui-polish.css?v=2" />
   <link rel="stylesheet" href="ui-study.css?v=3" />
@@ -16,6 +19,7 @@
   <link rel="stylesheet" href="ui-expand-fix.css?v=1" />
   <link rel="stylesheet" href="ui-ios-segmented.css?v=4" />
   <link rel="stylesheet" href="ui-separated-labels.css?v=1" />
+  <link rel="stylesheet" href="auth.css?v=1" />
 </head>
 <body>
   <a class="skip-link" href="#questions">質問一覧へ移動</a>
@@ -37,6 +41,7 @@
       </div>
 
       <div class="topbar__actions">
+        <button class="auth-button" id="authButton" type="button" aria-label="ログイン">ログイン</button>
         <button class="icon-button" id="expandAllButton" type="button" aria-label="すべて開く" title="すべて開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5.5l5 5 5-5"/><path d="M7 12.5l5 5 5-5"/></svg></button>
         <button class="icon-button" id="themeButton" type="button" aria-label="テーマを切り替える" title="昼夜モード"><svg class="theme-icon theme-icon--sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/></svg><svg class="theme-icon theme-icon--moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
       </div>
@@ -49,7 +54,7 @@
         <p class="hero__company">テンフィールズファクトリー株式会社｜京都｜AI社内SE</p>
         <h1>面接で「話せる」状態にするための質問集</h1>
         <p class="hero__lead">React / TypeScript の実務経験と、大学院での Python・AI 学習を自然につなげる回答例を、面接の流れに沿って整理しています。</p>
-        <div class="hero__meta" aria-label="コンテンツ概要"><span><strong id="questionCount">0</strong> 質問</span><span>日本語回答例</span><span>音声読み上げ対応</span><span>検索候補から直接移動</span></div>
+        <div class="hero__meta" aria-label="コンテンツ概要"><span><strong id="questionCount">0</strong> 質問</span><span>日本語回答例</span><span>音声読み上げ対応</span><span>個人回答はログイン保護</span></div>
       </div>
     </section>
 
@@ -103,17 +108,35 @@
     </div>
   </main>
 
+  <dialog class="auth-dialog" id="authDialog" aria-labelledby="authDialogTitle">
+    <div class="auth-dialog__inner">
+      <div class="auth-dialog__header">
+        <h2 id="authDialogTitle">プライベートモード</h2>
+        <button class="auth-dialog__close" id="authCloseButton" type="button" aria-label="閉じる">×</button>
+      </div>
+      <p class="auth-dialog__lead">登録済みユーザーだけが、個人経歴・学校・在留資格・希望給与などを含む回答例を読み込めます。新規ユーザーの自動登録は無効です。</p>
+      <div class="auth-field">
+        <label for="authEmail">メールアドレス</label>
+        <input id="authEmail" type="email" autocomplete="email" inputmode="email" />
+      </div>
+      <div class="auth-field">
+        <label for="authPassword">パスワード</label>
+        <input id="authPassword" type="password" autocomplete="current-password" />
+      </div>
+      <div class="auth-actions">
+        <button class="auth-action auth-action--primary" id="passwordLoginButton" type="button">パスワードでログイン</button>
+        <button class="auth-action" id="magicLinkButton" type="button">Magic Linkを送信</button>
+        <button class="auth-action auth-action--danger" id="logoutButton" type="button" hidden>ログアウト</button>
+      </div>
+      <p class="auth-message" id="authMessage" role="status" aria-live="polite"></p>
+      <p class="auth-privacy-note">UI設定はこの端末に保存されます。ログイン時は学習状態と「自分の回答」をSupabaseへ同期します。</p>
+    </div>
+  </dialog>
+
   <footer><p>Interview Questions · AI社内SE 面接対策</p></footer>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="data-1.js?v=1"></script>
-  <script src="data-2.js?v=1"></script>
-  <script src="data-3.js?v=1"></script>
-  <script src="data-4.js?v=1"></script>
-  <script src="app.js?v=5"></script>
-  <script src="training.js?v=1"></script>
-  <script src="study-hints.js?v=1"></script>
-  <script src="separate-control-labels.js?v=1"></script>
-  <script src="expand-practice-fix.js?v=1"></script>
-  <script src="ios-segmented.js?v=4"></script>
+
+  <script src="data-public.js?v=1"></script>
+  <script type="module" src="bootstrap.js?v=1"></script>
 </body>
 </html>
