@@ -33,7 +33,7 @@
 .study-memory-controls {
   align-items: center;
   gap: 18px;
-  padding-right: 16px;
+  margin-right: 24px;
 }
 
 .timer-segment-control {
@@ -57,7 +57,7 @@
 @media (max-width: 860px) {
   .study-memory-controls {
     align-items: stretch;
-    padding-right: 0;
+    margin-right: 0;
   }
 
   .memory-setting-row,
