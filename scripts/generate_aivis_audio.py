@@ -12,6 +12,7 @@ import argparse
 import base64
 import json
 import os
+import ssl
 import sys
 import time
 from pathlib import Path
@@ -23,6 +24,51 @@ PROJECT_REF = "flpmblfscgcbrprwwckz"
 STORAGE_KEY = f"sb-{PROJECT_REF}-auth-token"
 DEFAULT_SESSION_FILE = Path("~/.config/interview-questions/supabase-session.json").expanduser()
 SESSION_FILE = DEFAULT_SESSION_FILE
+
+
+def find_ca_bundle() -> str | None:
+    """Find a trusted CA bundle without disabling TLS verification."""
+    env_path = os.environ.get("SSL_CERT_FILE")
+    if env_path and Path(env_path).expanduser().is_file():
+        return str(Path(env_path).expanduser())
+
+    try:
+        import certifi  # type: ignore
+
+        certifi_path = certifi.where()
+        if certifi_path and Path(certifi_path).is_file():
+            return certifi_path
+    except ImportError:
+        pass
+
+    # Common certificate bundle locations on macOS / Homebrew Python.
+    candidates = [
+        "/etc/ssl/cert.pem",
+        "/opt/homebrew/etc/openssl@3/cert.pem",
+        "/opt/homebrew/etc/openssl/cert.pem",
+        "/usr/local/etc/openssl@3/cert.pem",
+        "/usr/local/etc/openssl/cert.pem",
+    ]
+    for candidate in candidates:
+        if Path(candidate).is_file():
+            return candidate
+    return None
+
+
+def configure_ssl() -> str:
+    """Make urllib use a verified CA bundle that works reliably on macOS."""
+    ca_bundle = find_ca_bundle()
+    context = ssl.create_default_context(cafile=ca_bundle) if ca_bundle else ssl.create_default_context()
+    original_urlopen = core.urlopen
+
+    def verified_urlopen(url: Any, *args: Any, **kwargs: Any) -> Any:
+        target = getattr(url, "full_url", str(url))
+        if str(target).startswith("https://"):
+            kwargs.setdefault("context", context)
+        return original_urlopen(url, *args, **kwargs)
+
+    core.urlopen = verified_urlopen
+    return ca_bundle or "Python default certificate store"
 
 
 def jwt_exp(access_token: str) -> int | None:
@@ -145,6 +191,7 @@ def passwordless_get_supabase_token(url: str, key: str, access_token: str | None
 def launcher_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--import-session", action="store_true")
+    parser.add_argument("--ssl-info", action="store_true")
     parser.add_argument(
         "--session-file",
         default=os.environ.get("INTERVIEW_SUPABASE_SESSION_FILE", str(DEFAULT_SESSION_FILE)),
@@ -156,6 +203,11 @@ def main() -> int:
     global SESSION_FILE
     launcher_args, remaining = launcher_parser().parse_known_args()
     SESSION_FILE = Path(launcher_args.session_file).expanduser().resolve()
+
+    ca_source = configure_ssl()
+    if launcher_args.ssl_info:
+        print(f"TLS CA bundle: {ca_source}")
+        return 0
 
     if launcher_args.import_session:
         if remaining:
@@ -176,5 +228,13 @@ if __name__ == "__main__":
         print("\nCancelled.", file=sys.stderr)
         raise SystemExit(130)
     except core.CliError as error:
-        print(f"Error: {error}", file=sys.stderr)
+        message = str(error)
+        if "CERTIFICATE_VERIFY_FAILED" in message:
+            message += (
+                "\n\nmacOS certificate fix:\n"
+                "  python3 -m pip install --upgrade certifi\n"
+                "Then run the command again. You can inspect the selected CA bundle with:\n"
+                "  python3 scripts/generate_aivis_audio.py --ssl-info"
+            )
+        print(f"Error: {message}", file=sys.stderr)
         raise SystemExit(1)
