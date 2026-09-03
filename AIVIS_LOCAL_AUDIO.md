@@ -1,204 +1,83 @@
 # Local AivisSpeech audio generation
 
-This repository includes a local-only CLI for generating interview-practice MP3 files with AivisSpeech.
-
-AivisSpeech itself returns WAV audio. The CLI keeps that WAV data only in memory and immediately converts it with `ffmpeg` to compact mono MP3, so no intermediate WAV files are saved to disk.
+This repository includes a local CLI for generating compact MP3 interview-practice audio with AivisSpeech and optionally uploading it to private Supabase Storage.
 
 Generated audio may contain private interview answers, so `local-audio/` is excluded by `.gitignore` and must not be committed to the public repository.
 
-## 1. Requirements
+## Playback priority
 
-Start AivisSpeech / AivisSpeech Engine on your Mac. The CLI uses this endpoint by default:
-
-```text
-http://127.0.0.1:10101
-```
-
-The MP3 conversion also requires `ffmpeg`:
-
-```bash
-brew install ffmpeg
-```
-
-## 2. Find the voice/style ID
-
-```bash
-python3 scripts/generate_aivis_audio.py --list-voices
-```
-
-Example:
+The website now uses this order when you press `音声で練習`:
 
 ```text
-Speaker Name
-  style-id=123456  Normal
+local development: local-audio/<set-slug>/q<ID>.mp3
+        ↓ if missing
+logged-in user: private Supabase Storage interview-audio/<user-id>/<set-slug>/q<ID>.mp3
+        ↓ if missing
+browser speechSynthesis fallback
 ```
 
-## 3. One-time passwordless Supabase session import
+Local audio is attempted on localhost / 127.0.0.1 / 0.0.0.0 / .local hosts. Serve the repository over HTTP (for example `python3 -m http.server 8000`) rather than opening `index.html` directly with `file://`.
 
-Open the logged-in Interview Questions site in Chrome. In DevTools → Console run:
+## One-time passwordless session import
+
+Open the logged-in Interview Questions site in Chrome, then DevTools → Console:
 
 ```js
 copy(localStorage.getItem('sb-flpmblfscgcbrprwwckz-auth-token'))
 ```
 
-Then in Terminal:
+Then:
 
 ```bash
 pbpaste | python3 scripts/generate_aivis_audio.py --import-session
 ```
 
-The CLI stores only the short-lived access token at:
+## Generate MP3 locally
+
+```bash
+python3 scripts/generate_aivis_audio.py \
+  --set conglomerate-synergy-system-engineer \
+  --style-id 497929760
+```
+
+Default output is mono 96 kbps MP3 under `local-audio/<set-slug>/`.
+
+## Generate and upload
+
+```bash
+python3 scripts/generate_aivis_audio.py \
+  --set conglomerate-synergy-system-engineer \
+  --style-id 497929760 \
+  --upload
+```
+
+Objects are uploaded to the private bucket path:
 
 ```text
-~/.config/interview-questions/supabase-session.json
+interview-audio/<your-user-id>/<set-slug>/q<ID>.mp3
 ```
 
-When it expires, repeat the same import. No Supabase password is required.
-
-## 4. Generate all ConglomerateSynergy audio
-
-Replace `123456` with your AivisSpeech style ID:
+## Upload existing files only
 
 ```bash
 python3 scripts/generate_aivis_audio.py \
   --set conglomerate-synergy-system-engineer \
-  --style-id 123456
+  --upload-only
 ```
 
-Default output:
+`--upload-only` uses the existing `manifest.json` and does not run AivisSpeech or ffmpeg.
+
+## Useful options
 
 ```text
-local-audio/
-└── conglomerate-synergy-system-engineer/
-    ├── q44.mp3
-    ├── q45.mp3
-    ├── q46.mp3
-    ├── ...
-    ├── q86.mp3
-    └── manifest.json
-```
-
-The default MP3 settings are:
-
-```text
-mono
-96 kbps
-```
-
-This is generally enough for clear interview-practice speech while keeping file size small.
-
-To choose another bitrate:
-
-```bash
-python3 scripts/generate_aivis_audio.py \
-  --set conglomerate-synergy-system-engineer \
-  --style-id 123456 \
-  --mp3-bitrate 128k
-```
-
-You can also set a default:
-
-```bash
-export AIVIS_MP3_BITRATE=96k
-```
-
-## 5. Generate only one question
-
-By question order inside the company set:
-
-```bash
-python3 scripts/generate_aivis_audio.py \
-  --set conglomerate-synergy-system-engineer \
-  --style-id 123456 \
-  --sort-order 1
-```
-
-Or by global database question ID:
-
-```bash
-python3 scripts/generate_aivis_audio.py \
-  --set conglomerate-synergy-system-engineer \
-  --style-id 123456 \
-  --question-id 44
-```
-
-## 6. Split question and answer into separate MP3 files
-
-```bash
-python3 scripts/generate_aivis_audio.py \
-  --set conglomerate-synergy-system-engineer \
-  --style-id 123456 \
-  --mode split
-```
-
-Output:
-
-```text
-q44-question.mp3
-q44-answer.mp3
-q45-question.mp3
-q45-answer.mp3
-```
-
-Modes:
-
-```text
---mode combined   q44.mp3 containing question + answer (default)
---mode split      q44-question.mp3 and q44-answer.mp3
---mode question   question MP3 only
---mode answer     answer MP3 only
-```
-
-## 7. Voice tuning
-
-```bash
-python3 scripts/generate_aivis_audio.py \
-  --set conglomerate-synergy-system-engineer \
-  --style-id 123456 \
-  --speed 0.92 \
-  --pitch 0.0 \
-  --intonation 1.05 \
-  --volume 1.0
-```
-
-For interview shadowing, a speed around `0.90` to `0.98` is usually comfortable.
-
-## 8. Regeneration behavior
-
-`manifest.json` stores a hash of the source text, voice settings, MP3 format, and bitrate.
-
-Running the same command again skips unchanged files:
-
-```text
-SKIP  q44.mp3
-SKIP  q45.mp3
-```
-
-If the Supabase answer or voice settings change, only the affected MP3 files are regenerated.
-
-Force regeneration:
-
-```bash
-python3 scripts/generate_aivis_audio.py \
-  --set conglomerate-synergy-system-engineer \
-  --style-id 123456 \
-  --overwrite
-```
-
-## 9. SSL diagnostics
-
-```bash
-python3 scripts/generate_aivis_audio.py --ssl-info
-```
-
-If your Python CA bundle is broken on macOS:
-
-```bash
-python3 -m pip install --upgrade certifi
+--sort-order 1        only one question in the current set
+--question-id 44      only one global DB question ID
+--mode combined       q44.mp3 (default; website playback uses this)
+--mode split          q44-question.mp3 + q44-answer.mp3
+--mp3-bitrate 128k    change MP3 bitrate
+--overwrite           regenerate unchanged files
 ```
 
 ## Privacy
 
-`local-audio/` can contain spoken versions of private employment history, school information, visa details, salary expectations, and other personal interview content. Keep it local.
-
-The local Supabase access-token file is stored outside the repository under `~/.config/interview-questions/`. Do not copy it into the repository or share it.
+Keep `local-audio/` gitignored. Online audio belongs in the private `interview-audio` Supabase Storage bucket, where RLS limits access to the authenticated user's UUID folder.

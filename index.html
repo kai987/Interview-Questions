@@ -9,7 +9,7 @@
   <meta name="description" content="面接対策用の質問・回答練習サイト。題庫はSupabaseから読み込み、個人向け回答はログイン後のみ表示。" />
   <meta name="robots" content="noindex,nofollow,noarchive" />
   <meta name="referrer" content="no-referrer" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://flpmblfscgcbrprwwckz.supabase.co wss://flpmblfscgcbrprwwckz.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://flpmblfscgcbrprwwckz.supabase.co wss://flpmblfscgcbrprwwckz.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests" />
   <title>Interview Questions</title>
   <link rel="stylesheet" href="styles.css?v={{ asset_version }}" />
   <link rel="stylesheet" href="ui-polish.css?v={{ asset_version }}" />
@@ -157,5 +157,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script type="module" src="bootstrap.js?v={{ asset_version }}"></script>
+  <script type="module" src="audio-player.js?v={{ asset_version }}"></script>
 </body>
 </html>
