@@ -1,0 +1,12 @@
+# Local AivisSpeech output. These files can contain private interview answers.
+local-audio/
+
+# Local environment/secrets
+.env
+.env.*
+!.env.example
+
+# Python local files
+__pycache__/
+*.pyc
+.venv/
