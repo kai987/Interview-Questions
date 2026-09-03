@@ -4,15 +4,22 @@
 The browser session is imported once from Supabase localStorage. Only the short-lived
 access token is stored locally; the browser refresh token is deliberately NOT stored
 or rotated by this CLI, so command-line use cannot disturb the browser's session.
+
+AivisSpeech returns WAV audio. This launcher converts that WAV data in memory with
+ffmpeg and writes compact mono MP3 files by default, so no intermediate WAV files are
+saved to disk.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
+import shutil
 import ssl
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -23,6 +30,7 @@ import _generate_aivis_audio_core as core
 PROJECT_REF = "flpmblfscgcbrprwwckz"
 STORAGE_KEY = f"sb-{PROJECT_REF}-auth-token"
 DEFAULT_SESSION_FILE = Path("~/.config/interview-questions/supabase-session.json").expanduser()
+DEFAULT_MP3_BITRATE = os.environ.get("AIVIS_MP3_BITRATE", "96k")
 SESSION_FILE = DEFAULT_SESSION_FILE
 
 
@@ -41,7 +49,6 @@ def find_ca_bundle() -> str | None:
     except ImportError:
         pass
 
-    # Common certificate bundle locations on macOS / Homebrew Python.
     candidates = [
         "/etc/ssl/cert.pem",
         "/opt/homebrew/etc/openssl@3/cert.pem",
@@ -71,6 +78,103 @@ def configure_ssl() -> str:
     return ca_bundle or "Python default certificate store"
 
 
+def configure_mp3_output(bitrate: str) -> None:
+    """Convert AivisSpeech WAV bytes to mono MP3 without writing a temporary WAV."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise core.CliError(
+            "ffmpeg was not found. Install it first, for example:\n"
+            "  brew install ffmpeg"
+        )
+
+    original_synthesize = core.synthesize
+    original_target_texts = core.target_texts
+    original_generation_hash = core.generation_hash
+
+    def mp3_target_texts(row: dict[str, Any], mode: str) -> list[tuple[str, str]]:
+        targets = original_target_texts(row, mode)
+        return [
+            ((filename[:-4] + ".mp3") if filename.lower().endswith(".wav") else filename, text)
+            for filename, text in targets
+        ]
+
+    def mp3_synthesize(
+        engine_url: str,
+        style_id: int,
+        text: str,
+        *,
+        speed_scale: float,
+        pitch_scale: float,
+        intonation_scale: float,
+        volume_scale: float,
+    ) -> bytes:
+        wav_data = original_synthesize(
+            engine_url,
+            style_id,
+            text,
+            speed_scale=speed_scale,
+            pitch_scale=pitch_scale,
+            intonation_scale=intonation_scale,
+            volume_scale=volume_scale,
+        )
+
+        process = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "wav",
+                "-i",
+                "pipe:0",
+                "-vn",
+                "-ac",
+                "1",
+                "-codec:a",
+                "libmp3lame",
+                "-b:a",
+                bitrate,
+                "-f",
+                "mp3",
+                "pipe:1",
+            ],
+            input=wav_data,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if process.returncode != 0:
+            detail = process.stderr.decode("utf-8", errors="replace").strip()
+            raise core.CliError(f"ffmpeg MP3 conversion failed:\n{detail}")
+        if not process.stdout:
+            raise core.CliError("ffmpeg returned an empty MP3 file.")
+        return process.stdout
+
+    def mp3_generation_hash(
+        text: str,
+        *,
+        style_id: int,
+        speed_scale: float,
+        pitch_scale: float,
+        intonation_scale: float,
+        volume_scale: float,
+    ) -> str:
+        base_hash = original_generation_hash(
+            text,
+            style_id=style_id,
+            speed_scale=speed_scale,
+            pitch_scale=pitch_scale,
+            intonation_scale=intonation_scale,
+            volume_scale=volume_scale,
+        )
+        return hashlib.sha256(f"{base_hash}|mp3|mono|{bitrate}".encode("utf-8")).hexdigest()
+
+    core.target_texts = mp3_target_texts
+    core.synthesize = mp3_synthesize
+    core.generation_hash = mp3_generation_hash
+
+
 def jwt_exp(access_token: str) -> int | None:
     try:
         payload = access_token.split(".")[1]
@@ -83,8 +187,6 @@ def jwt_exp(access_token: str) -> int | None:
 
 
 def normalize_browser_session(value: Any) -> dict[str, Any]:
-    # Chrome's copy(localStorage.getItem(...)) normally produces the session object
-    # as JSON text, but accept a few common wrappers as well.
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -103,8 +205,6 @@ def normalize_browser_session(value: Any) -> dict[str, Any]:
     if not access_token:
         raise core.CliError("No access_token was found in the imported browser session.")
 
-    # Do not persist refresh_token. Supabase refresh tokens rotate and are generally
-    # single-use; sharing one between the browser and CLI can interfere with login.
     safe_session: dict[str, Any] = {
         "access_token": access_token,
         "expires_at": value.get("expires_at") or jwt_exp(access_token),
@@ -192,6 +292,7 @@ def launcher_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--import-session", action="store_true")
     parser.add_argument("--ssl-info", action="store_true")
+    parser.add_argument("--mp3-bitrate", default=DEFAULT_MP3_BITRATE)
     parser.add_argument(
         "--session-file",
         default=os.environ.get("INTERVIEW_SUPABASE_SESSION_FILE", str(DEFAULT_SESSION_FILE)),
@@ -214,8 +315,8 @@ def main() -> int:
             raise core.CliError(f"Unexpected arguments with --import-session: {' '.join(remaining)}")
         return import_session_from_stdin(SESSION_FILE)
 
-    # Keep the original command-line interface while replacing password login with
-    # a browser-session access token lookup.
+    configure_mp3_output(launcher_args.mp3_bitrate)
+
     core.get_supabase_token = passwordless_get_supabase_token
     sys.argv = [sys.argv[0], *remaining]
     return core.main()
