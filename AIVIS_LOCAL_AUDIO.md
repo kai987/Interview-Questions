@@ -30,24 +30,59 @@ Speaker Name
 
 Use the desired numeric `style-id` in the generation commands below.
 
-## 3. List interview sets
+## 3. One-time passwordless Supabase session import
 
-The script signs into Supabase so it can read private interview answers. If login environment variables are not set, the CLI prompts for email and password interactively.
+The CLI no longer asks for a Supabase password.
+
+Open the Interview Questions site in Chrome and make sure you are already logged in. Then open DevTools → Console and run:
+
+```js
+copy(localStorage.getItem('sb-flpmblfscgcbrprwwckz-auth-token'))
+```
+
+Then in Terminal, from the repository root:
+
+```bash
+pbpaste | python3 scripts/generate_aivis_audio.py --import-session
+```
+
+The CLI stores only the short-lived Supabase `access_token` at:
+
+```text
+~/.config/interview-questions/supabase-session.json
+```
+
+The file permission is set to `600` when possible.
+
+For safety, the CLI deliberately does **not** store or rotate the browser's Supabase `refresh_token`. Refresh tokens are rotated by Supabase and sharing them between the browser and a separate CLI can interfere with the browser session.
+
+When the access token expires, repeat the same two commands above. No password is required.
+
+To use a custom session path:
+
+```bash
+pbpaste | python3 scripts/generate_aivis_audio.py \
+  --import-session \
+  --session-file ~/.config/interview-questions/my-session.json
+```
+
+You can also set:
+
+```bash
+export INTERVIEW_SUPABASE_SESSION_FILE="$HOME/.config/interview-questions/my-session.json"
+```
+
+## 4. List interview sets
+
+After importing the browser session:
 
 ```bash
 python3 scripts/generate_aivis_audio.py --list-sets
 ```
 
-Optional environment variables:
+No email or password prompt should appear.
 
-```bash
-export INTERVIEW_EMAIL='your-email@example.com'
-export INTERVIEW_PASSWORD='your-password'
-```
-
-Do not put the password in the repository.
-
-## 4. Generate all audio for ConglomerateSynergy
+## 5. Generate all audio for ConglomerateSynergy
 
 Replace `123456` with the AivisSpeech style ID you want to use:
 
@@ -76,7 +111,7 @@ The default `combined` mode reads:
 質問。<question>。回答例。<answer>
 ```
 
-## 5. Generate only one question
+## 6. Generate only one question
 
 By question number within the selected company (`sort_order`):
 
@@ -96,7 +131,7 @@ python3 scripts/generate_aivis_audio.py \
   --question-id 44
 ```
 
-## 6. Generate question and answer as separate WAV files
+## 7. Generate question and answer as separate WAV files
 
 ```bash
 python3 scripts/generate_aivis_audio.py \
@@ -123,7 +158,7 @@ Other modes:
 --mode answer     answer audio only
 ```
 
-## 7. Voice tuning
+## 8. Voice tuning
 
 Example:
 
@@ -148,7 +183,7 @@ Options correspond to AivisSpeech synthesis values:
 
 For interview practice, a speed around `0.90` to `0.98` is usually easy to shadow.
 
-## 8. Regeneration behavior
+## 9. Regeneration behavior
 
 The CLI creates `manifest.json` and stores a hash of the source text + voice settings for each WAV.
 
@@ -170,7 +205,7 @@ python3 scripts/generate_aivis_audio.py \
   --overwrite
 ```
 
-## 9. Preview without synthesizing
+## 10. Preview without synthesizing
 
 ```bash
 python3 scripts/generate_aivis_audio.py \
@@ -179,7 +214,7 @@ python3 scripts/generate_aivis_audio.py \
   --dry-run
 ```
 
-## 10. Custom AivisSpeech Engine URL
+## 11. Custom AivisSpeech Engine URL
 
 ```bash
 python3 scripts/generate_aivis_audio.py \
@@ -196,3 +231,5 @@ export AIVIS_ENGINE_URL='http://127.0.0.1:10101'
 ## Privacy
 
 `local-audio/` can contain spoken versions of private employment history, school information, visa details, salary expectations, and other personal interview content. Keep it local and do not remove it from `.gitignore` unless you intentionally want to publish those files.
+
+The local Supabase access-token file is stored outside the repository under `~/.config/interview-questions/`. Do not copy it into the repository or share it.
