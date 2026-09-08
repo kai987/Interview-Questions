@@ -406,10 +406,18 @@ def upload_local_audio(
 
     print(f"Storage bucket: {bucket}")
     print(f"Upload files: {len(entries)}")
+    _, current_rows = core.load_interview_set(args.supabase_url, args.supabase_key, access_token, args.set_slug)
+    current = {int(row["id"]): row for row in current_rows}
     uploaded = 0
-    for filename, _ in entries:
+    for filename, metadata in entries:
         file_path = set_dir / filename
-        object_path = f"{user_id}/{args.set_slug}/{filename}"
+        row = current.get(int(metadata["question_id"]))
+        digest = hashlib.sha256((row["question"] + "\n" + row["answer"]).encode("utf-8")).hexdigest() if row else None
+        if not digest or metadata.get("source_hash") != digest or metadata.get("audio_sha256") != hashlib.sha256(file_path.read_bytes()).hexdigest():
+            raise core.CliError(f"Audio does not match the current answer: {filename}. Generate it again before uploading.")
+        combined = filename == f"q{row['id']}.mp3"
+        versioned = f"q{row['id']}-{digest}.mp3" if combined else filename
+        object_path = f"{user_id}/{args.set_slug}/{versioned}"
         print(f"UPLOAD {filename} -> {object_path}")
         upload_mp3(
             supabase_url=args.supabase_url,
@@ -419,6 +427,12 @@ def upload_local_audio(
             object_path=object_path,
             file_path=file_path,
         )
+        if combined and bucket == DEFAULT_STORAGE_BUCKET:
+            core.http_request(
+                core.api_url(args.supabase_url, '/rest/v1/interview_private_content', {'user_id': f'eq.{user_id}', 'question_id': f"eq.{row['id']}"}),
+                method='PATCH', headers={'apikey': args.supabase_key, 'Authorization': f'Bearer {access_token}'},
+                json_body={'audio_text_hash': digest},
+            )
         uploaded += 1
 
     print(f"Upload complete. Uploaded: {uploaded}")

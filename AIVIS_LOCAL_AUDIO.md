@@ -81,3 +81,11 @@ python3 scripts/generate_aivis_audio.py \
 ## Privacy
 
 Keep `local-audio/` gitignored. Online audio belongs in the private `interview-audio` Supabase Storage bucket, where RLS limits access to the authenticated user's UUID folder.
+
+## Answer revision verification
+
+Combined recordings are now uploaded as `q<ID>-<source-hash>.mp3`. The hash is SHA-256 of the exact UTF-8 `question + "\n" + answer`. After uploading, the CLI registers that hash in the owner's `interview_private_content.audio_text_hash`.
+
+The manifest also records `source_hash` and `audio_sha256`. Upload refuses a file whose text or bytes differ from the current answer/manifest. Run normal generation first to upgrade an older manifest. An unchanged generation hash can reuse existing audio and backfill these fields.
+
+Existing verified recordings use the temporary registration format `legacy:<source-hash>:<audio-sha256>` and retain their old filename. The browser verifies both the current text and downloaded MP3 bytes before playing these recordings. New uploads always use the versioned filename. Short/standard answer variants use the browser's current Japanese voice; a full-answer recording is never played for different text.

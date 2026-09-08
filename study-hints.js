@@ -91,7 +91,7 @@
       if (!Number.isFinite(id)) return;
       const answerText = card.querySelector('.answer-text');
       const existing = card.querySelector('.answer-outline');
-      if (existing) existing.remove();
+      if (existing) return;
       if (!answerText) return;
       const outline = buildOutline(id);
       if (outline) answerText.before(outline);

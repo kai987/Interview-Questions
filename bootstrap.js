@@ -22,7 +22,7 @@ let bootComplete = false;
 let interviewSets = [];
 let activeSet = null;
 const stateCache = new Map();
-const saveTimers = new Map();
+let stateSync = null;
 
 const authButton = document.getElementById('authButton');
 const authDialog = document.getElementById('authDialog');
@@ -166,6 +166,8 @@ function mergePrivateContent(rows) {
     item.answer = row.answer || '';
     item.outline = row.outline || '';
     item.tags = Array.isArray(row.tags) ? row.tags : [];
+    item.answerVariants = row.answer_variants || {};
+    item.audioTextHash = row.audio_text_hash || '';
     item.privateUnlocked = true;
   });
 }
@@ -192,6 +194,7 @@ function writeLocalState(rows) {
   const practiced = [];
   const mastery = {};
   const ownAnswers = {};
+  const reviewHistory = {};
   stateCache.clear();
   (rows || []).forEach(row => {
     const id = Number(row.question_id);
@@ -200,8 +203,10 @@ function writeLocalState(rows) {
       favorite: Boolean(row.favorite),
       practiced: Boolean(row.practiced),
       mastery: row.mastery || null,
-      own_answer: row.own_answer || ''
+      own_answer: row.own_answer || '',
+      last_practiced_at: row.last_practiced_at || null
     });
+    if (row.last_practiced_at) reviewHistory[id] = row.last_practiced_at;
     if (row.favorite) favorites.push(id);
     if (row.practiced) practiced.push(id);
     if (row.mastery) mastery[id] = row.mastery;
@@ -211,6 +216,7 @@ function writeLocalState(rows) {
   localStorage.setItem('interview-practiced', JSON.stringify(practiced));
   localStorage.setItem('interview-mastery', JSON.stringify(mastery));
   localStorage.setItem('interview-own-answers', JSON.stringify(ownAnswers));
+  localStorage.setItem('interview-review-history', JSON.stringify(reviewHistory));
 }
 
 async function migrateLocalStateIfNeeded(remoteRows) {
@@ -243,8 +249,8 @@ async function loadPrivateData() {
   }
 
   const [contentResult, stateResult] = await Promise.all([
-    supabase.from('interview_private_content').select('question_id,answer,outline,tags').order('question_id'),
-    supabase.from('interview_user_state').select('question_id,favorite,practiced,mastery,own_answer').order('question_id')
+    supabase.from('interview_private_content').select('question_id,answer,outline,tags,answer_variants,audio_text_hash').order('question_id'),
+    supabase.from('interview_user_state').select('question_id,favorite,practiced,mastery,own_answer,last_practiced_at').order('question_id')
   ]);
   if (contentResult.error) throw contentResult.error;
   if (stateResult.error) throw stateResult.error;
@@ -253,41 +259,32 @@ async function loadPrivateData() {
   const scopedState = (stateResult.data || []).filter(row => currentIds.has(Number(row.question_id)));
   mergePrivateContent(scopedContent);
   const migratedRows = await migrateLocalStateIfNeeded(scopedState);
-  writeLocalState(migratedRows.length ? migratedRows : scopedState);
+  const merged = new Map((migratedRows.length ? migratedRows : scopedState).map(row => [Number(row.question_id), row]));
+  for (const row of stateSync?.pendingRows() || []) {
+    if (currentIds.has(row.question_id)) merged.set(row.question_id, { ...merged.get(row.question_id), ...row });
+  }
+  writeLocalState([...merged.values()]);
 }
 
 function clearPrivateLocalState() {
-  ['interview-favorites', 'interview-practiced', 'interview-mastery', 'interview-own-answers'].forEach(key => localStorage.removeItem(key));
+  ['interview-favorites', 'interview-practiced', 'interview-mastery', 'interview-own-answers', 'interview-review-history'].forEach(key => localStorage.removeItem(key));
 }
 
-async function saveState(questionId, patch, { debounce = false } = {}) {
-  if (!session?.user?.id) return;
+function saveState(questionId, patch, options = {}) {
+  if (!session?.user?.id || !stateSync) return;
   const id = Number(questionId);
-  if (!Number.isFinite(id)) return;
-  const current = stateCache.get(id) || { favorite: false, practiced: false, mastery: null, own_answer: '' };
+  const current = stateCache.get(id) || { favorite: false, practiced: false, mastery: null, own_answer: '', last_practiced_at: null };
   const next = { ...current, ...patch };
+  next.own_answer = String(next.own_answer || '').slice(0, 20000);
   stateCache.set(id, next);
-
-  const commit = async () => {
-    const row = stateCache.get(id) || next;
-    const { error } = await supabase.from('interview_user_state').upsert({
-      user_id: session.user.id,
-      question_id: id,
-      favorite: Boolean(row.favorite),
-      practiced: Boolean(row.practiced),
-      mastery: row.mastery || null,
-      own_answer: String(row.own_answer || '').slice(0, 20000)
-    }, { onConflict: 'user_id,question_id' });
-    if (error) console.warn('Could not sync interview state:', error.message);
-  };
-
-  if (!debounce) return commit();
-  clearTimeout(saveTimers.get(id));
-  saveTimers.set(id, setTimeout(commit, 500));
+  stateSync.save(id, next, options);
 }
 
 window.InterviewPrivateStore = {
   saveState,
+  getSyncStatus: id => stateSync?.getStatus(id) || 'local',
+  retry: () => stateSync?.retry(),
+  hasPending: () => stateSync?.hasPending() || false,
   isAuthenticated: () => Boolean(session),
   openLogin: openAuthDialog
 };
@@ -321,7 +318,16 @@ async function sendMagicLink() {
 
 async function logout() {
   logoutButton.disabled = true;
-  await supabase.auth.signOut();
+  if (stateSync?.hasPending()) {
+    await stateSync.retry();
+    if (stateSync.hasPending()) {
+      logoutButton.disabled = false;
+      setAuthMessage('未同期の変更があります。接続を確認してから、もう一度ログアウトしてください。', 'error');
+      return;
+    }
+  }
+  const { error } = await supabase.auth.signOut();
+  if (error) { logoutButton.disabled = false; setAuthMessage('ログアウトできませんでした。再度お試しください。', 'error'); return; }
   clearPrivateLocalState();
   window.location.reload();
 }
@@ -350,6 +356,22 @@ try {
 }
 updateAuthButton();
 
+if (session?.user?.id) {
+  const ownerId = session.user.id;
+  const { createStateSync } = await import('./sync-store.js?v={{ asset_version }}');
+  stateSync = createStateSync({
+    storage: localStorage, ownerId,
+    async send(id, row) {
+      if (session?.user?.id !== ownerId) throw new Error('Account changed');
+      const { error } = await supabase.from('interview_user_state').upsert({ ...row, user_id: ownerId, question_id: id }, { onConflict: 'user_id,question_id' });
+      if (error) throw error;
+    },
+    notify(id, status) { window.dispatchEvent(new CustomEvent('interview-sync', { detail: { id, status } })); }
+  });
+  window.addEventListener('online', () => void stateSync.retry());
+  window.addEventListener('pagehide', () => void stateSync.retry());
+}
+
 try {
   await loadInterviewLibrary();
   if (session) await loadPrivateData();
@@ -370,6 +392,7 @@ supabase.auth.onAuthStateChange((event, nextSession) => {
   // Supabase may emit SIGNED_IN again for an already authenticated session
   // when the browser tab becomes active. Do not reload for that repeated event.
   if (event === 'SIGNED_OUT' && wasSignedIn) {
+    stateSync?.stop();
     clearPrivateLocalState();
     window.location.reload();
   }
@@ -378,6 +401,7 @@ supabase.auth.onAuthStateChange((event, nextSession) => {
 await import('./app.js?v={{ asset_version }}');
 await import('./training.js?v={{ asset_version }}');
 await import('./study-hints.js?v={{ asset_version }}');
+await import('./answer-variants.js?v={{ asset_version }}');
 await import('./separate-control-labels.js?v={{ asset_version }}');
 await import('./expand-practice-fix.js?v={{ asset_version }}');
 await import('./ios-segmented.js?v={{ asset_version }}');
@@ -386,3 +410,5 @@ await import('./privacy-ui.js?v={{ asset_version }}');
 bootComplete = true;
 document.body.classList.toggle('private-mode-unlocked', Boolean(session));
 document.body.classList.toggle('guest-mode', !session);
+
+void stateSync?.retry();

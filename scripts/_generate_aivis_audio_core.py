@@ -438,6 +438,10 @@ def main() -> int:
             unchanged = output_path.exists() and previous.get("generation_hash") == digest
 
             if unchanged and not args.overwrite:
+                previous["source_hash"] = hashlib.sha256((row["question"] + "\n" + row["answer"]).encode("utf-8")).hexdigest()
+                previous["audio_sha256"] = hashlib.sha256(output_path.read_bytes()).hexdigest()
+                if not args.dry_run:
+                    save_manifest(manifest_path, manifest)
                 print(f"SKIP  {filename}")
                 skipped += 1
                 continue
@@ -458,6 +462,8 @@ def main() -> int:
                     "question_id": int(row["id"]),
                     "sort_order": int(row["sort_order"]),
                     "generation_hash": digest,
+                    "source_hash": hashlib.sha256((row["question"] + "\n" + row["answer"]).encode("utf-8")).hexdigest(),
+                    "audio_sha256": hashlib.sha256(audio).hexdigest(),
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 }
                 save_manifest(manifest_path, manifest)

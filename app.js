@@ -139,7 +139,7 @@
         </div>
         <div class="qa-answer">
           <div class="qa-toolbar"><button class="speech-button" type="button" data-speech-id="${item.id}" aria-label="この問答を読み上げる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg><span>音声で練習</span></button></div>
-          <p class="answer-label">回答例</p>
+          <p class="answer-label">${item.category === '逆質問' ? '逆質問のねらい' : '回答例'}</p>
           <div class="answer-text">${highlight(item.answer, query)}</div>
           ${(item.tags || []).length ? `<div class="tags">${item.tags.map(tag => `<span class="tag">${highlight(tag, query)}</span>`).join('')}</div>` : ''}
         </div>
@@ -237,8 +237,11 @@
   function syncScrollCategory() {
     scrollTicking = false;
     if (activeCategory !== 'all') return;
-    const sections = [...document.querySelectorAll('[data-category-section]')];
-    if (!sections.length) return;
+    const sections = [...document.querySelectorAll('[data-category-section]')].filter(section => !section.hidden);
+    if (!sections.length) {
+      if (scrollActiveCategory !== null) { scrollActiveCategory = null; renderNav(); }
+      return;
+    }
     const anchor = Math.min(window.innerHeight * 0.3, 220);
     let current = sections[0];
     for (const section of sections) {
@@ -328,6 +331,19 @@
     const summary = event.target.closest('.qa-card > summary');
     if (summary && !event.target.closest('button')) event.preventDefault();
   });
+
+  window.addEventListener('interview-session-rated', event => {
+    practicedIds.add(Number(event.detail.id));
+    saveIdSet('interview-practiced', practicedIds);
+    updateStudyStats();
+    const button = document.querySelector(`[data-practiced-id="${Number(event.detail.id)}"]`);
+    button?.setAttribute('aria-pressed', 'true');
+    button?.classList.add('is-active');
+    const label = button?.querySelector('.state-button__label');
+    if (label) label.textContent = '練習済み';
+  });
+  window.addEventListener('interview-session-step', requestScrollSync);
+  window.addEventListener('interview-session-start', () => { revealedIds.clear(); renderQuestions(); });
 
   clearSearchButton.addEventListener('click', () => { searchInput.value = ''; currentQuery = ''; activeCategory = 'all'; scrollActiveCategory = null; renderQuestions(); searchInput.focus(); });
   themeButton.addEventListener('click', () => { const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; applyTheme(next); showToast(next === 'dark' ? '夜間モードに切り替えました' : '昼間モードに切り替えました'); });

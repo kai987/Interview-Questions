@@ -44,10 +44,10 @@ interview_sets / interview_questions
 Supabaseへ接続するため、`index.html` を `file://` で直接開くのではなくローカルHTTPサーバーを使用してください。
 
 ```bash
-python3 -m http.server 8000
+python3 scripts/serve_local.py --port 8000
 ```
 
-その後 `http://localhost:8000` を開いてください。
+その後 `http://127.0.0.1:8000` を開いてください。ローカルサーバーはGitHub Pages用のLiquidヘッダーを展開します。
 
 ## Speech
 
@@ -61,3 +61,26 @@ python3 -m http.server 8000
 - `training.js` - ランダム練習、タイマー、掌握度、自分の回答
 - `privacy-ui.js` - ログイン保護と学習状態同期
 - `library.css` - 題庫切り替えUI
+
+## Guided practice and save recovery
+
+- ランダム練習は逆質問を除く面接質問から最大10問を選び、一問ずつ表示します。自己評価またはスキップで次へ進み、終了後に復習候補を確認できます。
+- 「今日の復習」は、模擬面接での最終評価から「まだ」1日、「普通」3日、「自信あり」7日を目安に再出題します。未評価の質問も対象です。
+- `sync-store.js` はアカウント別の未同期データを端末に残し、同じ質問の送信を直列化します。失敗時は表示、オンライン復帰・次回起動・再試行時に再送します。
+- 「端末保存済み」と「クラウドに保存済み」を分けています。未同期データが残る場合は、明示的なログアウト前に再送します。ブラウザデータの削除や複数端末の同時編集に対する履歴・競合解決機能ではありません。
+- 回答例は `answer_variants.short` / `answer_variants.standard` / 既存の `answer`（全文）を切り替えます。30秒・60秒は目安です。逆質問は時間別回答へ変換しません。
+- 短縮版はブラウザ音声で読み上げます。録音は、質問と全文のSHA-256が登録値と一致した場合のみ再生します。
+
+2026-09-08 に Supabase migration `interview_practice_variants_and_review` を適用しました（既存RLSを維持）。再構築時に必要な追加列：
+
+```sql
+alter table public.interview_private_content
+  add column if not exists answer_variants jsonb not null default '{}'::jsonb,
+  add column if not exists audio_text_hash text;
+alter table public.interview_user_state
+  add column if not exists last_practiced_at timestamptz;
+```
+
+個人向けの回答本文・短縮版はSupabaseに保存し、Gitには含めません。
+
+保存処理の回帰テスト：`node --test tests/*.test.mjs`（Node.js 22.18以降）。

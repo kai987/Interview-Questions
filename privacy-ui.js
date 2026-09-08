@@ -40,10 +40,8 @@
 
   function syncStateSoon(id, options = {}) {
     if (!window.InterviewPrivateStore?.isAuthenticated?.()) return;
-    setTimeout(() => {
-      const state = currentLocalState(id);
-      window.InterviewPrivateStore.saveState(id, state, options);
-    }, 0);
+    const state = currentLocalState(id);
+    window.InterviewPrivateStore.saveState(id, state, options);
   }
 
   questionSections.addEventListener('click', event => {
@@ -58,15 +56,51 @@
     if (practiced) return syncStateSoon(Number(practiced.dataset.practicedId));
     const mastery = event.target.closest('[data-mastery-id]');
     if (mastery) return syncStateSoon(Number(mastery.dataset.masteryId));
-  }, true);
+  });
 
   questionSections.addEventListener('input', event => {
     const textarea = event.target.closest('[data-own-answer-id]');
     if (!textarea) return;
     syncStateSoon(Number(textarea.dataset.ownAnswerId), { debounce: true });
-  }, true);
+  });
 
-  const observer = new MutationObserver(() => requestAnimationFrame(enhanceGuestLocks));
+  const syncBanner = document.createElement('div');
+  syncBanner.className = 'sync-banner';
+  syncBanner.hidden = true;
+  syncBanner.innerHTML = '<span role="status" aria-live="polite"></span><button type="button" class="training-action" hidden>同期を再試行</button>';
+  document.querySelector('.study-tools-wrap')?.append(syncBanner);
+  syncBanner.querySelector('button').addEventListener('click', () => window.InterviewPrivateStore?.retry());
+  const labels = {
+    local: '端末保存済み・同期待ち', syncing: 'クラウドに同期中…', synced: 'クラウドに保存済み',
+    error: '同期できませんでした。変更は端末に保存されています。',
+    'local-error': '端末への保存に失敗しました。入力をコピーして保管してください。'
+  };
+  const states = new Map();
+  function updateSyncUI() {
+    if (!window.InterviewPrivateStore?.isAuthenticated?.()) return;
+    document.querySelectorAll('[data-own-answer-id]').forEach(input => {
+      const id = Number(input.dataset.ownAnswerId);
+      const state = window.InterviewPrivateStore.getSyncStatus(id);
+      if (state !== 'synced') states.set(id, state);
+      const status = input.closest('.own-answer-editor')?.querySelector('.own-answer-status');
+      const text = input.value || state !== 'synced' ? labels[state] : '未入力';
+      if (status && status.textContent !== text) status.textContent = text;
+    });
+    const values = [...states.values()];
+    const state = ['local-error', 'error', 'syncing', 'local'].find(value => values.includes(value)) || 'synced';
+    syncBanner.hidden = !states.size;
+    syncBanner.dataset.state = state;
+    const text = syncBanner.querySelector('span');
+    if (text.textContent !== labels[state]) text.textContent = labels[state];
+    syncBanner.querySelector('button').hidden = !['local-error', 'error', 'local'].includes(state);
+  }
+  window.addEventListener('interview-sync', event => {
+    states.set(event.detail.id, event.detail.status);
+    updateSyncUI();
+  });
+
+  const observer = new MutationObserver(() => requestAnimationFrame(() => { enhanceGuestLocks(); updateSyncUI(); }));
   observer.observe(questionSections, { childList: true, subtree: true });
   enhanceGuestLocks();
+  updateSyncUI();
 })();

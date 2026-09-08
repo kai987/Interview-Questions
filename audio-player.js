@@ -6,6 +6,7 @@
   const AUDIO_BUCKET = 'interview-audio';
 
   let speakingId = null;
+  let playbackRequest = 0;
   let activeAudio = null;
   let activeUtterance = null;
   const privateAudioCache = new Map();
@@ -37,6 +38,7 @@
   }
 
   function stopPlayback() {
+    playbackRequest += 1;
     if (activeAudio) {
       activeAudio.pause();
       activeAudio.removeAttribute('src');
@@ -74,16 +76,39 @@
     }
   }
 
+  async function sha256(bytes) {
+    return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function verifiedRevision(item) {
+    if (!item.answer || !item.audioTextHash || !crypto.subtle) return null;
+    const parts = item.audioTextHash.split(':');
+    const legacy = parts[0] === 'legacy';
+    const hash = legacy ? parts[1] : parts[0];
+    if (!/^[a-f0-9]{64}$/.test(hash || '')) return null;
+    if (await sha256(new TextEncoder().encode(item.question + '\n' + item.answer)) !== hash) return null;
+    return { hash, legacy, bytes: legacy ? parts[2] : null };
+  }
+
   async function resolveLocalAudio(item) {
     if (!isLocalDevelopment()) return null;
     const slug = activeSetSlug();
     if (!slug) return null;
 
+    const revision = await verifiedRevision(item);
+    if (!revision?.bytes) return null;
     const relative = `local-audio/${encodeURIComponent(slug)}/q${Number(item.id)}.mp3`;
     const url = new URL(relative, document.baseURI).href;
     try {
-      const response = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-      return response.ok ? url : null;
+      const cacheKey = 'local:' + url + ':' + item.audioTextHash;
+      if (privateAudioCache.has(cacheKey)) return privateAudioCache.get(cacheKey);
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      if (await sha256(await blob.arrayBuffer()) !== revision.bytes) return null;
+      const objectUrl = URL.createObjectURL(blob);
+      privateAudioCache.set(cacheKey, objectUrl);
+      return objectUrl;
     } catch {
       return null;
     }
@@ -99,9 +124,12 @@
     const userId = String(session?.user?.id || jwtSubject(accessToken) || '').trim();
     if (!userId) return null;
 
-    const filename = `q${Number(item.id)}.mp3`;
+    const revision = await verifiedRevision(item);
+    if (!revision) return null;
+    const filename = revision.legacy ? `q${Number(item.id)}.mp3` : `q${Number(item.id)}-${revision.hash}.mp3`;
     const objectPath = `${userId}/${slug}/${filename}`;
-    if (privateAudioCache.has(objectPath)) return privateAudioCache.get(objectPath);
+    const cacheKey = objectPath + ':' + item.audioTextHash;
+    if (privateAudioCache.has(cacheKey)) return privateAudioCache.get(cacheKey);
 
     const encodedPath = objectPath.split('/').map(part => encodeURIComponent(part)).join('/');
     const url = `${SUPABASE_URL}/storage/v1/object/authenticated/${AUDIO_BUCKET}/${encodedPath}`;
@@ -126,8 +154,9 @@
 
       const blob = await response.blob();
       if (!blob.size) return null;
+      if (revision.bytes && await sha256(await blob.arrayBuffer()) !== revision.bytes) return null;
       const objectUrl = URL.createObjectURL(blob);
-      privateAudioCache.set(objectPath, objectUrl);
+      privateAudioCache.set(cacheKey, objectUrl);
       return objectUrl;
     } catch (error) {
       console.warn('Could not load private interview audio:', error);
@@ -186,11 +215,17 @@
     speakingId = item.id;
     setButtonState(button, '読込中…');
 
-    const source = await resolveAudioSource(item);
-    if (speakingId !== item.id) return;
+    const request = playbackRequest;
+    const answer = window.InterviewAnswers?.text(item) ?? item.answer;
+    const spokenItem = { ...item, answer };
+    const source = answer === item.answer ? await resolveAudioSource(item) : null;
+    if (speakingId !== item.id || request !== playbackRequest) return;
+    let note = button.closest('.qa-toolbar')?.querySelector('.audio-source-note');
+    if (!note && button.closest('.qa-toolbar')) { note = document.createElement('span'); note.className = 'audio-source-note'; button.after(note); }
+    if (note) note.textContent = source ? '録音音声' : '現在の回答をブラウザ音声で読み上げ';
 
     if (!source) {
-      speakWithBrowser(item, button);
+      speakWithBrowser(spokenItem, button);
       return;
     }
 
@@ -201,9 +236,10 @@
       if (activeAudio === audio) stopPlayback();
     };
     audio.onerror = () => {
-      if (activeAudio !== audio || speakingId !== item.id) return;
+      if (activeAudio !== audio || speakingId !== item.id || request !== playbackRequest) return;
       activeAudio = null;
-      speakWithBrowser(item, button);
+      if (note) note.textContent = '現在の回答をブラウザ音声で読み上げ';
+      speakWithBrowser(spokenItem, button);
     };
 
     try {
@@ -211,7 +247,10 @@
       if (activeAudio === audio && speakingId === item.id) setButtonState(button, '停止');
     } catch {
       if (activeAudio === audio) activeAudio = null;
-      if (speakingId === item.id) speakWithBrowser(item, button);
+      if (speakingId === item.id && request === playbackRequest) {
+        if (note) note.textContent = '現在の回答をブラウザ音声で読み上げ';
+        speakWithBrowser(spokenItem, button);
+      }
     }
   }
 

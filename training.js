@@ -27,6 +27,16 @@
   let activeTimerRemaining = 0;
   let timerInterval = null;
   let randomIds = null;
+  let sessionIds = [];
+  let sessionIndex = 0;
+  let sessionRatings = {};
+  let sessionDone = false;
+  const history = loadObject('interview-review-history');
+  const sessionPanel = document.createElement('section');
+  sessionPanel.className = 'practice-session';
+  sessionPanel.hidden = true;
+  sessionPanel.setAttribute('aria-label', '模擬面接の進行');
+  questionSections.before(sessionPanel);
   let observerQueued = false;
   let toastTimer = null;
 
@@ -89,8 +99,8 @@
             </button>
             <span class="answer-timer__display" data-timer-display="${id}">${formatSeconds(selectedTimerSeconds)}</span>
           </div>
-          <div class="mastery-control" role="group" aria-label="この質問の掌握度">
-            <span class="training-label">掌握度</span>
+          <div class="mastery-control" role="group" aria-label="この質問の習熟度">
+            <span class="training-label">習熟度</span>
             <button type="button" class="mastery-button ${level === 'learning' ? 'is-active' : ''}" data-mastery-id="${id}" data-mastery-level="learning">まだ</button>
             <button type="button" class="mastery-button ${level === 'okay' ? 'is-active' : ''}" data-mastery-id="${id}" data-mastery-level="okay">普通</button>
             <button type="button" class="mastery-button ${level === 'confident' ? 'is-active' : ''}" data-mastery-id="${id}" data-mastery-level="confident">自信あり</button>
@@ -99,13 +109,13 @@
         <details class="own-answer-editor" ${text ? 'open' : ''}>
           <summary>
             <span>自分の回答</span>
-            <span class="own-answer-status">${text ? '保存済み' : '未入力'}</span>
+            <span class="own-answer-status">${text ? '端末保存済み' : '未入力'}</span>
           </summary>
           <div class="own-answer-editor__body">
-            <textarea data-own-answer-id="${id}" rows="6" placeholder="自分の言葉で回答を書いてください。例文を丸暗記せず、結論 → 具体例 → この会社でどう活かすか、の順で整理すると話しやすくなります。">${escapeHtml(text)}</textarea>
+            <textarea data-own-answer-id="${id}" rows="6" maxlength="20000" aria-label="自分の回答" placeholder="自分の言葉で回答を書いてください。例文を丸暗記せず、結論 → 具体例 → この会社でどう活かすか、の順で整理すると話しやすくなります。">${escapeHtml(text)}</textarea>
             <div class="own-answer-editor__footer">
               <span data-own-answer-count="${id}">${text.length} 文字</span>
-              <span>入力内容はこのブラウザに自動保存されます</span>
+              <span>入力は端末に保存し、ログイン中はクラウドへ同期します</span>
             </div>
           </div>
         </details>
@@ -228,6 +238,15 @@
     if (!['learning', 'okay', 'confident'].includes(level)) return;
     if (mastery[id] === level) delete mastery[id];
     else mastery[id] = level;
+    if (randomIds && !sessionDone) {
+      mastery[id] = level;
+      sessionRatings[id] = level;
+      history[id] = new Date().toISOString();
+      saveObject('interview-review-history', history);
+      window.dispatchEvent(new CustomEvent('interview-session-rated', { detail: { id } }));
+      window.InterviewPrivateStore?.saveState(id, { mastery: level, practiced: true, last_practiced_at: history[id] });
+      renderSessionPanel();
+    }
     saveObject(MASTERY_KEY, mastery);
     const card = document.getElementById(`q-${id}`);
     if (card) syncCardMastery(card, id);
@@ -240,7 +259,7 @@
     const editor = document.querySelector(`[data-own-answer-id="${id}"]`)?.closest('.own-answer-editor');
     const status = editor?.querySelector('.own-answer-status');
     const count = editor?.querySelector(`[data-own-answer-count="${id}"]`);
-    if (status) status.textContent = value.trim() ? '保存済み' : '未入力';
+    if (status) status.textContent = value.trim() ? '端末保存済み' : '未入力';
     if (count) count.textContent = `${value.length} 文字`;
   }
 
@@ -254,7 +273,7 @@
   }
 
   function randomCandidates(source) {
-    const ids = data.map(item => Number(item.id));
+    const ids = data.filter(item => item.category !== '逆質問').map(item => Number(item.id));
     if (source === 'favorites') {
       const favorites = loadIdSet('interview-favorites');
       return ids.filter(id => favorites.has(id));
@@ -263,6 +282,11 @@
       const practiced = loadIdSet('interview-practiced');
       return ids.filter(id => !practiced.has(id));
     }
+    if (source === 'review') return ids.filter(id => {
+      const last = Date.parse(history[id] || '');
+      const days = mastery[id] === 'confident' ? 7 : mastery[id] === 'okay' ? 3 : 1;
+      return !Number.isFinite(last) || Date.now() - last >= days * 86400000;
+    });
     return ids;
   }
 
@@ -276,21 +300,83 @@
     }
   }
 
+  function renderSessionPanel() {
+    sessionPanel.hidden = !randomIds;
+    if (!randomIds) return;
+    if (sessionDone) {
+      const counts = Object.values(sessionRatings);
+      const review = sessionIds.filter(id => sessionRatings[id] !== 'confident');
+      sessionPanel.innerHTML = `<h3 tabindex="-1">練習お疲れさまでした</h3>
+        <p>${sessionIds.length}問中 ${counts.length}問を自己評価しました。自信あり ${counts.filter(v => v === 'confident').length}問・復習候補 ${review.length}問</p>
+        <p>評価しなかった質問も、復習候補に含めています。</p>
+        <ul>${review.map(id => `<li>${escapeHtml(data.find(item => Number(item.id) === id)?.question || '')}</li>`).join('')}</ul>
+        <button type="button" class="training-action training-action--primary" data-session-action="review" ${review.length ? '' : 'disabled'}>復習候補をもう一度</button>
+        <button type="button" class="training-action" data-session-action="exit">質問一覧へ戻る</button>`;
+    } else {
+      const id = sessionIds[sessionIndex];
+      const rated = Boolean(sessionRatings[id]);
+      sessionPanel.innerHTML = `<div class="practice-session__heading"><h3 tabindex="-1">模擬面接 · ${sessionIndex + 1} / ${sessionIds.length}問</h3><button type="button" class="training-action" data-session-action="exit">練習を終了</button></div>
+        <progress value="${sessionIndex}" max="${sessionIds.length}" aria-label="完了した質問数"></progress>
+        <p role="status">${rated ? '自己評価を記録しました。次へ進めます。' : '回答開始 → 自分の言葉で話す → 回答例を見る → 習熟度を選ぶ'}</p>
+        <button type="button" class="training-action training-action--primary" data-session-action="next" ${rated ? '' : 'disabled'}>${sessionIndex + 1 === sessionIds.length ? '結果を見る' : '次の質問へ'}</button>
+        <button type="button" class="training-action" data-session-action="skip">${sessionIndex + 1 === sessionIds.length ? '評価せず結果を見る' : '後で復習する'}</button>`;
+    }
+  }
+
   function applyRandomFilter() {
     if (!(randomIds instanceof Set)) return;
     document.querySelectorAll('.qa-card').forEach(card => {
-      const id = itemIdFromCard(card);
-      card.hidden = !randomIds.has(id);
+      card.hidden = sessionDone || itemIdFromCard(card) !== sessionIds[sessionIndex];
     });
     document.querySelectorAll('.category-section').forEach(section => {
-      const visible = [...section.querySelectorAll('.qa-card')].some(card => !card.hidden);
-      section.hidden = !visible;
+      section.hidden = ![...section.querySelectorAll('.qa-card')].some(card => !card.hidden);
+      const count = section.querySelector('.category-heading > span');
+      if (count && !section.hidden) count.textContent = '今回の質問';
     });
-    if (resultSummary) resultSummary.textContent = `ランダム練習：${randomIds.size}問を表示しています`;
+    if (resultSummary) resultSummary.textContent = sessionDone ? '模擬面接の振り返り' : `模擬面接：${sessionIndex + 1} / ${sessionIds.length}問`;
+    window.dispatchEvent(new Event('interview-session-step'));
   }
+
+  function beginSession(ids) {
+    stopActiveTimer();
+    window.InterviewAudioPlayer?.stop();
+    sessionIds = ids;
+    sessionIndex = 0;
+    sessionRatings = {};
+    sessionDone = false;
+    randomIds = new Set(ids);
+    searchInput.value = '';
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    window.dispatchEvent(new Event('interview-session-start'));
+    if (practiceModeButton?.getAttribute('aria-pressed') !== 'true') practiceModeButton?.click();
+    updateRandomUI();
+    renderSessionPanel();
+    enhanceCards();
+    sessionPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    sessionPanel.querySelector('h3')?.focus({ preventScroll: true });
+  }
+
+  sessionPanel.addEventListener('click', event => {
+    const action = event.target.closest('[data-session-action]')?.dataset.sessionAction;
+    if (!action) return;
+    if (action === 'exit') { clearRandomPractice(); return; }
+    if (action === 'review') { beginSession(sessionIds.filter(id => sessionRatings[id] !== 'confident')); return; }
+    if (action === 'next' && !sessionRatings[sessionIds[sessionIndex]]) return;
+    stopActiveTimer();
+    window.InterviewAudioPlayer?.stop();
+    sessionIndex += 1;
+    sessionDone = sessionIndex >= sessionIds.length;
+    renderSessionPanel();
+    applyRandomFilter();
+    sessionPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    sessionPanel.querySelector('h3')?.focus({ preventScroll: true });
+  });
 
   function clearRandomPractice({ rerender = true } = {}) {
     randomIds = null;
+    stopActiveTimer();
+    window.InterviewAudioPlayer?.stop();
+    sessionPanel.hidden = true;
     updateRandomUI();
     document.querySelectorAll('.qa-card, .category-section').forEach(element => { element.hidden = false; });
     if (rerender && searchInput) {
@@ -303,22 +389,13 @@
     const source = randomSource?.value || 'all';
     const candidates = randomCandidates(source);
     if (!candidates.length) {
-      showToast(source === 'favorites' ? '重点問題がまだありません' : '対象になる未練習問題がありません');
+      showToast(source === 'favorites' ? '重点問題がまだありません' : source === 'review' ? '今日の復習は完了しています' : '対象になる未練習問題がありません');
       return;
     }
-    randomIds = new Set(shuffledSample(candidates, 10));
-    if (searchInput) {
-      searchInput.value = '';
-      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    if (practiceModeButton?.getAttribute('aria-pressed') !== 'true') practiceModeButton?.click();
-    updateRandomUI();
-    requestAnimationFrame(() => {
-      enhanceCards();
-      document.getElementById('questions')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    showToast(`${randomIds.size}問のランダム練習を開始しました`);
+    beginSession(shuffledSample(candidates, 10));
   }
+
+  document.getElementById('normalModeButton')?.addEventListener('click', () => { if (randomIds) clearRandomPractice(); });
 
   timerSecondsButtons.forEach(button => {
     button.addEventListener('click', () => setTimerSeconds(button.dataset.timerSeconds));
