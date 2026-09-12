@@ -73,10 +73,15 @@ python3 scripts/serve_local.py --port 8000
 
 2026-09-08 に Supabase migration `interview_practice_variants_and_review` を適用しました（既存RLSを維持）。再構築時に必要な追加列：
 
+2026-09-13 に `add_interview_audio_duration_seconds` を適用し、既存の録音61件へ測定済みの時長を補完しました。`duration_seconds` は生成・アップロード時に音声ハッシュと一緒に登録され、画面は音声をダウンロードせず総時間を表示します。未登録の場合のみ従来のメタデータ読込を使用します。
+
 ```sql
 alter table public.interview_private_content
   add column if not exists answer_variants jsonb not null default '{}'::jsonb,
   add column if not exists audio_text_hash text;
+alter table public.interview_private_content
+  add column if not exists duration_seconds numeric(12,6)
+  check (duration_seconds > 0 and duration_seconds < 'Infinity'::numeric);
 alter table public.interview_user_state
   add column if not exists last_practiced_at timestamptz;
 ```

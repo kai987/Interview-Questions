@@ -16,7 +16,7 @@ logged-in user: private Supabase Storage interview-audio/<user-id>/<set-slug>/q<
 browser speechSynthesis fallback
 ```
 
-Local audio is attempted on localhost / 127.0.0.1 / 0.0.0.0 / .local hosts. Serve the repository over HTTP (for example `python3 -m http.server 8000`) rather than opening `index.html` directly with `file://`.
+Local audio is attempted on localhost / 127.0.0.1 / 0.0.0.0 / .local hosts. Serve the repository with `python3 scripts/serve_local.py --port 8000` so its Jekyll headers are expanded correctly.
 
 ## One-time passwordless session import
 
@@ -41,6 +41,8 @@ python3 scripts/generate_aivis_audio.py \
 ```
 
 Default output is mono 96 kbps MP3 under `local-audio/<set-slug>/`.
+
+The active audio library and manifests contain MP3 files only. Five historical WAV entries (q44–q48) were retired in favor of their existing, verified MP3 replacements; their originals were backed up outside the repository. AivisSpeech's WAV response is converted in memory, so the public generation command does not leave WAV files on disk.
 
 ## Generate and upload
 
@@ -86,6 +88,19 @@ Keep `local-audio/` gitignored. Online audio belongs in the private `interview-a
 
 Combined recordings are now uploaded as `q<ID>-<source-hash>.mp3`. The hash is SHA-256 of the exact UTF-8 `question + "\n" + answer`. After uploading, the CLI registers that hash in the owner's `interview_private_content.audio_text_hash`.
 
-The manifest also records `source_hash` and `audio_sha256`. Upload refuses a file whose text or bytes differ from the current answer/manifest. Run normal generation first to upgrade an older manifest. An unchanged generation hash can reuse existing audio and backfill these fields.
+The manifest also records `source_hash`, `audio_sha256`, and `duration_seconds`. Duration is measured from the final MP3 with `ffprobe` (included with FFmpeg); WAV duration uses sample frames. Upload refuses a file whose text or bytes differ from the current answer/manifest. Run normal generation first to upgrade an older manifest. An unchanged generation hash can reuse existing audio and backfill these fields.
+
+Generation, reuse of unchanged files, and `--upload-only` all measure the final file's duration. The upload registers `duration_seconds` together with `audio_text_hash` in the private content row. The page can display the saved total without fetching audio; actual playback metadata then calibrates the total. Missing durations retain the metadata-loading fallback. Browser speech has no known total and cannot be seeked.
+
+To measure existing local audio without synthesis, login, or upload:
+
+```bash
+python3 scripts/backfill_audio_durations.py --dry-run
+python3 scripts/backfill_audio_durations.py
+```
+
+This updates manifests only. To register a verified recording and its duration in Supabase, use the existing `--upload-only` flow. The `duration_seconds` schema addition is documented in README. The September 13 backfill registered durations only for existing database audio hashes that matched the local MP3 bytes and current answer; it did not regenerate or upload recordings.
+
+Duration checks: `python3 -m unittest discover -s tests -p 'test_*.py'`.
 
 Existing verified recordings use the temporary registration format `legacy:<source-hash>:<audio-sha256>` and retain their old filename. The browser verifies both the current text and downloaded MP3 bytes before playing these recordings. New uploads always use the versioned filename. Short/standard answer variants use the browser's current Japanese voice; a full-answer recording is never played for different text.

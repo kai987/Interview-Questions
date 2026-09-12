@@ -415,6 +415,8 @@ def upload_local_audio(
         digest = hashlib.sha256((row["question"] + "\n" + row["answer"]).encode("utf-8")).hexdigest() if row else None
         if not digest or metadata.get("source_hash") != digest or metadata.get("audio_sha256") != hashlib.sha256(file_path.read_bytes()).hexdigest():
             raise core.CliError(f"Audio does not match the current answer: {filename}. Generate it again before uploading.")
+        metadata["duration_seconds"] = core.audio_duration_seconds(file_path)
+        core.save_manifest(manifest_path, manifest)
         combined = filename == f"q{row['id']}.mp3"
         versioned = f"q{row['id']}-{digest}.mp3" if combined else filename
         object_path = f"{user_id}/{args.set_slug}/{versioned}"
@@ -431,7 +433,7 @@ def upload_local_audio(
             core.http_request(
                 core.api_url(args.supabase_url, '/rest/v1/interview_private_content', {'user_id': f'eq.{user_id}', 'question_id': f"eq.{row['id']}"}),
                 method='PATCH', headers={'apikey': args.supabase_key, 'Authorization': f'Bearer {access_token}'},
-                json_body={'audio_text_hash': digest},
+                json_body={'audio_text_hash': digest, 'duration_seconds': metadata['duration_seconds']},
             )
         uploaded += 1
 

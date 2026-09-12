@@ -14,9 +14,13 @@ import argparse
 import getpass
 import hashlib
 import json
+import math
 import os
+import shutil
+import subprocess
 import sys
 import time
+import wave
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -309,6 +313,29 @@ def save_manifest(path: Path, manifest: dict[str, Any]) -> None:
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def audio_duration_seconds(path: Path) -> float:
+    """Measure the final file, including any MP3 encoder padding."""
+    try:
+        if path.suffix.lower() == ".wav":
+            with wave.open(str(path), "rb") as audio:
+                duration = audio.getnframes() / audio.getframerate()
+        else:
+            ffprobe = shutil.which("ffprobe")
+            if not ffprobe:
+                raise CliError("ffprobe was not found. Install FFmpeg (brew install ffmpeg).")
+            result = subprocess.run(
+                [ffprobe, "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+                capture_output=True, text=True, check=True, timeout=30,
+            )
+            duration = float(result.stdout.strip())
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("duration must be finite and positive")
+        return round(duration, 6)
+    except (OSError, ValueError, wave.Error, subprocess.SubprocessError) as error:
+        raise CliError(f"Could not measure audio duration: {path}") from error
+
+
 def select_questions(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
     selected = rows
     if args.question_id:
@@ -441,6 +468,7 @@ def main() -> int:
                 previous["source_hash"] = hashlib.sha256((row["question"] + "\n" + row["answer"]).encode("utf-8")).hexdigest()
                 previous["audio_sha256"] = hashlib.sha256(output_path.read_bytes()).hexdigest()
                 if not args.dry_run:
+                    previous["duration_seconds"] = audio_duration_seconds(output_path)
                     save_manifest(manifest_path, manifest)
                 print(f"SKIP  {filename}")
                 skipped += 1
@@ -464,6 +492,7 @@ def main() -> int:
                     "generation_hash": digest,
                     "source_hash": hashlib.sha256((row["question"] + "\n" + row["answer"]).encode("utf-8")).hexdigest(),
                     "audio_sha256": hashlib.sha256(audio).hexdigest(),
+                    "duration_seconds": audio_duration_seconds(output_path),
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 }
                 save_manifest(manifest_path, manifest)

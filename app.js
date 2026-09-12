@@ -138,7 +138,7 @@
           <button class="practice-reveal-button" type="button" data-reveal-id="${item.id}">${revealed ? '回答例を隠す' : '回答例を見る'}</button>
         </div>
         <div class="qa-answer">
-          <div class="qa-toolbar"><button class="speech-button" type="button" data-speech-id="${item.id}" aria-label="この問答を読み上げる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg><span>音声で練習</span></button></div>
+          <div class="qa-toolbar"><button class="speech-button" type="button" data-speech-id="${item.id}" aria-label="この問答を読み上げる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg><span>音声で練習</span></button><span class="audio-source-note">00:00 / --:--</span><input class="audio-seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="音声の再生位置" disabled /></div>
           <p class="answer-label">${item.category === '逆質問' ? '逆質問のねらい' : '回答例'}</p>
           <div class="answer-text">${highlight(item.answer, query)}</div>
           ${(item.tags || []).length ? `<div class="tags">${item.tags.map(tag => `<span class="tag">${highlight(tag, query)}</span>`).join('')}</div>` : ''}

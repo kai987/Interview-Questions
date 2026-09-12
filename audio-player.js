@@ -15,6 +15,7 @@
   let playbackPaused = false;
   let audioPlayAttempt = 0;
   const privateAudioCache = new Map();
+  const audioPreviews = new Map();
 
   function activeSetSlug() {
     return String(window.InterviewLibrary?.activeSet?.slug || '').trim();
@@ -53,50 +54,22 @@
     if (!note) return;
     const progress = `${formatTime(currentTime)} / ${formatTime(audio.duration)}`;
     if (note.textContent !== progress) note.textContent = progress;
-    if (activeAudio === audio && activeSeekControl) {
+    const slider = note.closest('.qa-toolbar')?.querySelector('.audio-seek');
+    if (slider) {
       const hasDuration = Number.isFinite(audio.duration) && audio.duration > 0;
-      activeSeekControl.disabled = !hasDuration;
-      activeSeekControl.max = hasDuration ? String(audio.duration) : '0';
-      if (!activeSeekControl.hasPointerCapture(seekPointerId)) {
-        activeSeekControl.value = String(currentTime);
+      slider.disabled = !hasDuration;
+      slider.max = hasDuration ? String(audio.duration) : '0';
+      if (!slider.hasPointerCapture(seekPointerId)) {
+        slider.value = String(currentTime);
       }
-      activeSeekControl.setAttribute('aria-valuetext', progress);
-      activeSeekControl.style.setProperty('--audio-progress', `${hasDuration ? Math.min(100, Math.max(0, Number(activeSeekControl.value) / audio.duration * 100)) : 0}%`);
+      slider.setAttribute('aria-valuetext', progress);
+      slider.style.setProperty('--audio-progress', `${hasDuration ? Math.min(100, Math.max(0, Number(slider.value) / audio.duration * 100)) : 0}%`);
     }
   }
 
   function clearSeekControl() {
-    activeSeekControl?.remove();
     activeSeekControl = null;
     seekPointerId = -1;
-  }
-
-  function addSeekControl(audio, note, button) {
-    if (!note) return;
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.className = 'audio-seek';
-    slider.min = '0';
-    slider.max = '0';
-    slider.step = '0.1';
-    slider.value = '0';
-    slider.disabled = true;
-    slider.setAttribute('aria-label', '音声の再生位置');
-    slider.addEventListener('pointerdown', event => {
-      seekPointerId = event.pointerId;
-      slider.setPointerCapture(event.pointerId);
-    });
-    slider.addEventListener('lostpointercapture', () => {
-      if (activeAudio === audio) showAudioProgress(audio, note);
-    });
-    slider.addEventListener('input', () => {
-      if (activeAudio !== audio || !Number.isFinite(audio.duration)) return;
-      audio.currentTime = Math.min(audio.duration, Math.max(0, Number(slider.value)));
-      showAudioProgress(audio, note);
-      if (playbackPaused) setButtonState(button, '再開', false);
-    });
-    note.after(slider);
-    activeSeekControl = slider;
   }
 
   function stopPlayback() {
@@ -271,6 +244,77 @@
     return null;
   }
 
+  function previewKey(item) {
+    return JSON.stringify([activeSetSlug(), item.id, item.audioTextHash, item.audioDurationSeconds, item.question,
+      window.InterviewAnswers?.text(item) ?? item.answer]);
+  }
+
+  function savedDuration(item) {
+    const duration = Number(item.audioDurationSeconds);
+    return Number.isFinite(duration) && duration > 0 ? duration : null;
+  }
+
+  function prepareAudio(item) {
+    const key = previewKey(item);
+    if (audioPreviews.has(key)) return audioPreviews.get(key);
+    const pending = (async () => {
+      if ((window.InterviewAnswers?.text(item) ?? item.answer) !== item.answer) return null;
+      const source = await resolveAudioSource(item);
+      if (!source) return null;
+      if (savedDuration(item)) return { ...source, duration: savedDuration(item) };
+      const duration = await new Promise(resolve => {
+        const probe = new Audio();
+        const finish = () => {
+          clearTimeout(timeout);
+          const duration = probe.duration;
+          probe.onloadedmetadata = probe.onerror = null;
+          probe.removeAttribute('src');
+          probe.load();
+          resolve(duration);
+        };
+        const timeout = setTimeout(finish, 10000);
+        probe.onloadedmetadata = probe.onerror = finish;
+        probe.preload = 'metadata';
+        probe.src = source.url;
+      });
+      return { ...source, duration };
+    })();
+    audioPreviews.set(key, pending);
+    // Allow a failed request to be retried when the user presses Play.
+    pending.then(source => { if (!source) audioPreviews.delete(key); });
+    return pending;
+  }
+
+  function refreshPreviews() {
+    if (activeProgressNote && !activeProgressNote.isConnected) stopPlayback();
+    const items = new Map((window.INTERVIEW_DATA || []).map(item => [Number(item.id), item]));
+    document.querySelectorAll('.qa-card').forEach(card => {
+      const item = items.get(Number(card.id.slice(2)));
+      const note = card.querySelector('.audio-source-note');
+      if (!item || !note) return;
+      const key = previewKey(item);
+      if (card.dataset.audioPreviewKey !== key) {
+        card.dataset.audioPreviewKey = key;
+        delete card.dataset.audioPreviewLoaded;
+        showAudioProgress({ currentTime: 0, duration: NaN }, note);
+        note.title = '音声の長さを確認中';
+      }
+      if (card.dataset.audioPreviewLoaded === key) return;
+      const duration = savedDuration(item);
+      if (!duration && (!card.open || card.hidden)) return;
+      card.dataset.audioPreviewLoaded = key;
+      const preview = duration
+        ? Promise.resolve((window.InterviewAnswers?.text(item) ?? item.answer) === item.answer
+          ? verifiedRevision(item) : null).then(revision => revision ? { duration } : null)
+        : prepareAudio(item);
+      void preview.then(source => {
+        if (!card.isConnected || card.dataset.audioPreviewKey !== key || speakingId === item.id) return;
+        showAudioProgress({ currentTime: 0, duration: source?.duration ?? NaN }, note);
+        note.title = source ? '再生時間 / 音声の長さ' : 'ブラウザ音声は長さの事前取得・位置指定に対応していません';
+      });
+    });
+  }
+
   function getJapaneseVoice() {
     const voices = window.speechSynthesis?.getVoices?.() || [];
     return voices.find(voice => voice.lang === 'ja-JP')
@@ -312,6 +356,9 @@
       return;
     }
 
+    const toolbar = button.closest('.qa-toolbar');
+    const slider = toolbar?.querySelector('.audio-seek');
+    const initialTime = Number(slider?.value) || 0;
     stopPlayback();
     speakingId = item.id;
     setButtonState(button, '読込中…');
@@ -319,11 +366,11 @@
     const request = playbackRequest;
     const answer = window.InterviewAnswers?.text(item) ?? item.answer;
     const spokenItem = { ...item, answer };
-    const source = answer === item.answer ? await resolveAudioSource(item) : null;
+    const source = await prepareAudio(item);
     if (speakingId !== item.id || request !== playbackRequest) return;
-    let note = button.closest('.qa-toolbar')?.querySelector('.audio-source-note');
-    if (!note && button.closest('.qa-toolbar')) { note = document.createElement('span'); note.className = 'audio-source-note'; button.after(note); }
-    if (note) note.textContent = source ? '00:00 / --:--' : '現在の回答をブラウザ音声で読み上げ';
+    const note = toolbar?.querySelector('.audio-source-note');
+    showAudioProgress({ currentTime: initialTime, duration: source?.duration ?? NaN }, note);
+    if (note) note.title = source ? '再生時間 / 音声の長さ' : 'ブラウザ音声は長さの事前取得・位置指定に対応していません';
 
     if (!source) {
       speakWithBrowser(spokenItem, button);
@@ -333,10 +380,14 @@
     const audio = new Audio(source.url);
     activeAudio = audio;
     activeProgressNote = note;
-    addSeekControl(audio, note, button);
+    activeSeekControl = slider;
     audio.preload = 'auto';
+    if (Number.isFinite(source.duration) && initialTime < source.duration) audio.currentTime = initialTime;
     const updateProgress = () => {
-      if (activeAudio === audio) showAudioProgress(audio, note);
+      if (activeAudio === audio) showAudioProgress({
+        currentTime: audio.currentTime,
+        duration: Number.isFinite(audio.duration) ? audio.duration : source.duration
+      }, note);
     };
     audio.onloadedmetadata = updateProgress;
     audio.ondurationchange = updateProgress;
@@ -357,7 +408,8 @@
       activeAudio = null;
       activeProgressNote = null;
       clearSeekControl();
-      if (note) note.textContent = '現在の回答をブラウザ音声で読み上げ';
+      showAudioProgress({ currentTime: 0, duration: NaN }, note);
+      if (note) note.title = 'ブラウザ音声は長さの事前取得・位置指定に対応していません';
       speakWithBrowser(spokenItem, button);
     };
 
@@ -371,7 +423,8 @@
       activeProgressNote = null;
       clearSeekControl();
       if (speakingId === item.id && request === playbackRequest) {
-        if (note) note.textContent = '現在の回答をブラウザ音声で読み上げ';
+        showAudioProgress({ currentTime: 0, duration: NaN }, note);
+        if (note) note.title = 'ブラウザ音声は長さの事前取得・位置指定に対応していません';
         speakWithBrowser(spokenItem, button);
       }
     }
@@ -390,6 +443,39 @@
     if (item) void play(item, button);
   }, true);
 
+  document.addEventListener('pointerdown', event => {
+    const slider = event.target.closest?.('.audio-seek');
+    if (!slider || slider.disabled) return;
+    seekPointerId = event.pointerId;
+    slider.setPointerCapture(event.pointerId);
+  });
+  document.addEventListener('lostpointercapture', event => {
+    if (event.target === activeSeekControl && activeAudio) showAudioProgress(activeAudio, activeProgressNote);
+  }, true);
+  document.addEventListener('input', event => {
+    const slider = event.target.closest?.('.audio-seek');
+    if (!slider || slider.disabled) return;
+    const toolbar = slider.closest('.qa-toolbar');
+    const time = Math.min(Number(slider.max), Math.max(0, Number(slider.value)));
+    if (slider === activeSeekControl && activeAudio) {
+      activeAudio.currentTime = time;
+      showAudioProgress(activeAudio, activeProgressNote);
+      if (playbackPaused) setButtonState(toolbar.querySelector('.speech-button'), '再開', false);
+    } else {
+      showAudioProgress({ currentTime: time, duration: Number(slider.max) }, toolbar.querySelector('.audio-source-note'));
+    }
+  });
+
+  const root = document.getElementById('questionSections');
+  if (root) {
+    new MutationObserver(refreshPreviews).observe(root, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['open', 'hidden', 'class']
+    });
+    root.addEventListener('toggle', refreshPreviews, true);
+  }
+  window.addEventListener('interview-answer-changed', refreshPreviews);
+  refreshPreviews();
+
   window.addEventListener('beforeunload', () => {
     stopPlayback();
     privateAudioCache.forEach(url => URL.revokeObjectURL(url));
@@ -400,6 +486,7 @@
     stop: stopPlayback,
     isLocalDevelopment,
     clearCache() {
+      audioPreviews.clear();
       privateAudioCache.forEach(url => URL.revokeObjectURL(url));
       privateAudioCache.clear();
     }

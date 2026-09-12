@@ -42,6 +42,7 @@
     card.querySelectorAll('[data-answer-length]').forEach(control => control.setAttribute('aria-pressed', String(control === button)));
     // Length controls select prose; do not leave it hidden by keyword mode.
     document.querySelector('[data-toggle-group="answer"][data-toggle-value="full"]')?.click();
+    window.dispatchEvent(new Event('interview-answer-changed'));
   });
   const observer = new MutationObserver(enhance);
   observer.observe(root, { childList: true, subtree: true });
