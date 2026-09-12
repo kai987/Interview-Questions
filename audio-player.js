@@ -63,7 +63,7 @@
         slider.value = String(currentTime);
       }
       slider.setAttribute('aria-valuetext', progress);
-      slider.style.setProperty('--audio-progress', `${hasDuration ? Math.min(100, Math.max(0, Number(slider.value) / audio.duration * 100)) : 0}%`);
+      slider.closest('.audio-seek-control').style.setProperty('--audio-progress', `${hasDuration ? Math.min(100, Math.max(0, Number(slider.value) / audio.duration * 100)) : 0}%`);
     }
   }
 
