@@ -61,6 +61,7 @@
         activeSeekControl.value = String(currentTime);
       }
       activeSeekControl.setAttribute('aria-valuetext', progress);
+      activeSeekControl.style.setProperty('--audio-progress', `${hasDuration ? Math.min(100, Math.max(0, Number(activeSeekControl.value) / audio.duration * 100)) : 0}%`);
     }
   }
 
