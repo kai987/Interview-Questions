@@ -283,6 +283,14 @@ html[data-theme="dark"] {
 .answer-length-control button { min-height: 44px; }
 .answer-length-control button[aria-pressed="true"] { color: var(--training-purple); background: var(--training-purple-soft); border-color: var(--training-purple); }
 .answer-duration-note, .audio-source-note { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.audio-source-note { font-variant-numeric: tabular-nums; }
+.qa-toolbar { flex-wrap: wrap; }
+.audio-seek { flex: 1 1 120px; width: 120px; max-width: 280px; min-width: 0; height: 32px; margin: 0; accent-color: var(--accent, #5265e8); cursor: pointer; }
+.audio-seek:disabled { cursor: default; }
+.audio-seek:focus-visible { outline: 2px solid var(--accent, #5265e8); outline-offset: 3px; border-radius: 4px; }
+@media (max-width: 600px) {
+  .audio-seek { flex-basis: 100%; max-width: none; }
+}
 @media (max-width: 640px) {
   .practice-session { padding: 18px; scroll-margin-top: 165px; }
   .practice-session__heading, .sync-banner { align-items: flex-start; flex-direction: column; }

@@ -8,7 +8,12 @@
   let speakingId = null;
   let playbackRequest = 0;
   let activeAudio = null;
+  let activeProgressNote = null;
+  let activeSeekControl = null;
+  let seekPointerId = -1;
   let activeUtterance = null;
+  let playbackPaused = false;
+  let audioPlayAttempt = 0;
   const privateAudioCache = new Map();
 
   function activeSetSlug() {
@@ -24,9 +29,7 @@
 
   function resetSpeechButtons() {
     document.querySelectorAll('.speech-button').forEach(button => {
-      button.classList.remove('is-speaking');
-      const label = button.querySelector('span');
-      if (label) label.textContent = '音声で練習';
+      setButtonState(button, '音声で練習', false);
     });
   }
 
@@ -35,20 +38,113 @@
     button.classList.toggle('is-speaking', active);
     const span = button.querySelector('span');
     if (span) span.textContent = label;
+    button.setAttribute('aria-label', label === '停止' ? '読み上げを一時停止する'
+      : label === '再開' ? '読み上げを再開する'
+      : label === '読込中…' ? '音声を読み込み中' : 'この問答を読み上げる');
+  }
+
+  function formatTime(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return '--:--';
+    const wholeSeconds = Math.floor(seconds);
+    return `${String(Math.floor(wholeSeconds / 60)).padStart(2, '0')}:${String(wholeSeconds % 60).padStart(2, '0')}`;
+  }
+
+  function showAudioProgress(audio, note, currentTime = audio.currentTime) {
+    if (!note) return;
+    const progress = `${formatTime(currentTime)} / ${formatTime(audio.duration)}`;
+    if (note.textContent !== progress) note.textContent = progress;
+    if (activeAudio === audio && activeSeekControl) {
+      const hasDuration = Number.isFinite(audio.duration) && audio.duration > 0;
+      activeSeekControl.disabled = !hasDuration;
+      activeSeekControl.max = hasDuration ? String(audio.duration) : '0';
+      if (!activeSeekControl.hasPointerCapture(seekPointerId)) {
+        activeSeekControl.value = String(currentTime);
+      }
+      activeSeekControl.setAttribute('aria-valuetext', progress);
+    }
+  }
+
+  function clearSeekControl() {
+    activeSeekControl?.remove();
+    activeSeekControl = null;
+    seekPointerId = -1;
+  }
+
+  function addSeekControl(audio, note, button) {
+    if (!note) return;
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.className = 'audio-seek';
+    slider.min = '0';
+    slider.max = '0';
+    slider.step = '0.1';
+    slider.value = '0';
+    slider.disabled = true;
+    slider.setAttribute('aria-label', '音声の再生位置');
+    slider.addEventListener('pointerdown', event => {
+      seekPointerId = event.pointerId;
+      slider.setPointerCapture(event.pointerId);
+    });
+    slider.addEventListener('lostpointercapture', () => {
+      if (activeAudio === audio) showAudioProgress(audio, note);
+    });
+    slider.addEventListener('input', () => {
+      if (activeAudio !== audio || !Number.isFinite(audio.duration)) return;
+      audio.currentTime = Math.min(audio.duration, Math.max(0, Number(slider.value)));
+      showAudioProgress(audio, note);
+      if (playbackPaused) setButtonState(button, '再開', false);
+    });
+    note.after(slider);
+    activeSeekControl = slider;
   }
 
   function stopPlayback() {
     playbackRequest += 1;
+    audioPlayAttempt += 1;
+    playbackPaused = false;
     if (activeAudio) {
-      activeAudio.pause();
-      activeAudio.removeAttribute('src');
-      activeAudio.load();
+      const audio = activeAudio;
+      showAudioProgress(audio, activeProgressNote, 0);
       activeAudio = null;
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
     }
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    activeProgressNote = null;
+    clearSeekControl();
     activeUtterance = null;
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     speakingId = null;
     resetSpeechButtons();
+  }
+
+  function pausePlayback(button) {
+    playbackPaused = true;
+    // Invalidate a pending play() promise without discarding the current position.
+    audioPlayAttempt += 1;
+    if (activeAudio) activeAudio.pause();
+    if (activeUtterance) window.speechSynthesis.pause();
+    setButtonState(button, '再開', false);
+  }
+
+  async function resumePlayback(button) {
+    playbackPaused = false;
+    setButtonState(button, '停止');
+    if (activeAudio) {
+      const audio = activeAudio;
+      const attempt = ++audioPlayAttempt;
+      try {
+        if (audio.ended) audio.currentTime = 0;
+        await audio.play();
+      } catch {
+        if (activeAudio === audio && audioPlayAttempt === attempt) {
+          playbackPaused = true;
+          setButtonState(button, '再開', false);
+        }
+      }
+    } else if (activeUtterance) {
+      window.speechSynthesis.resume();
+    }
   }
 
   function readBrowserSession() {
@@ -203,11 +299,15 @@
       if (activeUtterance === utterance) stopPlayback();
     };
     window.speechSynthesis.speak(utterance);
+    // cancel() can leave the synthesis engine paused when switching questions.
+    window.speechSynthesis.resume();
   }
 
   async function play(item, button) {
     if (speakingId === item.id) {
-      stopPlayback();
+      if (playbackPaused) await resumePlayback(button);
+      else if (activeAudio || activeUtterance) pausePlayback(button);
+      else stopPlayback(); // A second click while resolving the source cancels loading.
       return;
     }
 
@@ -222,7 +322,7 @@
     if (speakingId !== item.id || request !== playbackRequest) return;
     let note = button.closest('.qa-toolbar')?.querySelector('.audio-source-note');
     if (!note && button.closest('.qa-toolbar')) { note = document.createElement('span'); note.className = 'audio-source-note'; button.after(note); }
-    if (note) note.textContent = source ? '録音音声' : '現在の回答をブラウザ音声で読み上げ';
+    if (note) note.textContent = source ? '00:00 / --:--' : '現在の回答をブラウザ音声で読み上げ';
 
     if (!source) {
       speakWithBrowser(spokenItem, button);
@@ -231,22 +331,44 @@
 
     const audio = new Audio(source.url);
     activeAudio = audio;
+    activeProgressNote = note;
+    addSeekControl(audio, note, button);
     audio.preload = 'auto';
+    const updateProgress = () => {
+      if (activeAudio === audio) showAudioProgress(audio, note);
+    };
+    audio.onloadedmetadata = updateProgress;
+    audio.ondurationchange = updateProgress;
+    audio.ontimeupdate = updateProgress;
+    audio.onpause = updateProgress;
+    audio.onseeked = updateProgress;
+    updateProgress();
     audio.onended = () => {
-      if (activeAudio === audio) stopPlayback();
+      if (activeAudio !== audio) return;
+      audioPlayAttempt += 1;
+      playbackPaused = true;
+      updateProgress();
+      setButtonState(button, '音声で練習', false);
     };
     audio.onerror = () => {
       if (activeAudio !== audio || speakingId !== item.id || request !== playbackRequest) return;
+      if (playbackPaused) { stopPlayback(); return; }
       activeAudio = null;
+      activeProgressNote = null;
+      clearSeekControl();
       if (note) note.textContent = '現在の回答をブラウザ音声で読み上げ';
       speakWithBrowser(spokenItem, button);
     };
 
+    const attempt = ++audioPlayAttempt;
     try {
       await audio.play();
-      if (activeAudio === audio && speakingId === item.id) setButtonState(button, '停止');
+      if (activeAudio === audio && speakingId === item.id && attempt === audioPlayAttempt) setButtonState(button, '停止');
     } catch {
+      if (activeAudio !== audio || attempt !== audioPlayAttempt) return;
       if (activeAudio === audio) activeAudio = null;
+      activeProgressNote = null;
+      clearSeekControl();
       if (speakingId === item.id && request === playbackRequest) {
         if (note) note.textContent = '現在の回答をブラウザ音声で読み上げ';
         speakWithBrowser(spokenItem, button);
