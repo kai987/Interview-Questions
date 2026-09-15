@@ -76,8 +76,15 @@
     'local-error': '端末への保存に失敗しました。入力をコピーして保管してください。'
   };
   const states = new Map();
+  let successTimer = null;
   function updateSyncUI() {
-    if (!window.InterviewPrivateStore?.isAuthenticated?.()) return;
+    if (!window.InterviewPrivateStore?.isAuthenticated?.()) {
+      clearTimeout(successTimer);
+      successTimer = null;
+      states.clear();
+      syncBanner.hidden = true;
+      return;
+    }
     document.querySelectorAll('[data-own-answer-id]').forEach(input => {
       const id = Number(input.dataset.ownAnswerId);
       const state = window.InterviewPrivateStore.getSyncStatus(id);
@@ -93,6 +100,19 @@
     const text = syncBanner.querySelector('span');
     if (text.textContent !== labels[state]) text.textContent = labels[state];
     syncBanner.querySelector('button').hidden = !['local-error', 'error', 'local'].includes(state);
+    if (state !== 'synced' || !states.size) {
+      clearTimeout(successTimer);
+      successTimer = null;
+    } else if (successTimer === null) {
+      successTimer = setTimeout(() => {
+        successTimer = null;
+        // Forget acknowledged saves so unrelated DOM updates cannot reopen the notice.
+        for (const [id, status] of states) {
+          if (status === 'synced') states.delete(id);
+        }
+        updateSyncUI();
+      }, 2500);
+    }
   }
   window.addEventListener('interview-sync', event => {
     states.set(event.detail.id, event.detail.status);
