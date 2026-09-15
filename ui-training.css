@@ -276,7 +276,7 @@ html[data-theme="dark"] {
 .practice-session ul { padding-left: 22px; line-height: 1.8; }
 .practice-session .training-action { margin: 4px 6px 4px 0; min-height: 44px; }
 .practice-session button:disabled { opacity: .5; cursor: default; }
-.sync-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--surface); font-size: 14px; }
+.sync-banner { position: fixed; z-index: 45; right: 16px; bottom: 84px; width: min(440px, calc(100% - 32px)); box-sizing: border-box; box-shadow: var(--panel-shadow); display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--surface); font-size: 14px; }
 .sync-banner[data-state="error"], .sync-banner[data-state="local-error"] { border-color: var(--training-orange); background: var(--training-orange-soft); }
 .own-answer-status { white-space: normal; }
 .answer-length-control { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }

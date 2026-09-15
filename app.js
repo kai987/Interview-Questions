@@ -290,8 +290,14 @@
       const id = Number(favoriteButton.dataset.favoriteId);
       favoriteIds.has(id) ? favoriteIds.delete(id) : favoriteIds.add(id);
       saveIdSet('interview-favorites', favoriteIds);
-      renderQuestions();
-      showToast(favoriteIds.has(id) ? '重点問題に追加しました' : '重点問題から外しました');
+      const favorite = favoriteIds.has(id);
+      // Keep the card and its controls mounted to preserve scroll and playback state.
+      favoriteButton.closest('.qa-card').classList.toggle('is-favorite', favorite);
+      favoriteButton.classList.toggle('is-active', favorite);
+      favoriteButton.setAttribute('aria-pressed', String(favorite));
+      favoriteButton.querySelector('[aria-hidden="true"]').textContent = favorite ? '★' : '☆';
+      updateStudyStats();
+      showToast(favorite ? '重点問題に追加しました' : '重点問題から外しました');
       return;
     }
 
