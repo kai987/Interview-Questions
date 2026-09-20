@@ -25,7 +25,9 @@
 
   let activeTimerId = null;
   let activeTimerRemaining = 0;
+  let activeTimerEndsAt = 0;
   let timerInterval = null;
+  const finishedTimerIds = new Set();
   let randomIds = null;
   let sessionIds = [];
   let sessionIndex = 0;
@@ -124,14 +126,14 @@
 
   function syncCardMastery(card, id) {
     const level = mastery[id] || '';
-    card.dataset.mastery = level;
+    if (card.dataset.mastery !== level) card.dataset.mastery = level;
     card.classList.toggle('mastery-learning', level === 'learning');
     card.classList.toggle('mastery-okay', level === 'okay');
     card.classList.toggle('mastery-confident', level === 'confident');
     card.querySelectorAll('[data-mastery-id]').forEach(button => {
       const active = button.dataset.masteryLevel === level;
       button.classList.toggle('is-active', active);
-      button.setAttribute('aria-pressed', String(active));
+      if (button.getAttribute('aria-pressed') !== String(active)) button.setAttribute('aria-pressed', String(active));
     });
   }
 
@@ -144,6 +146,7 @@
         if (reveal) reveal.insertAdjacentHTML('afterend', renderWorkbench(id));
       }
       syncCardMastery(card, id);
+      syncTimerCard(card, id);
     });
     updateTimerDisplays();
     applyRandomFilter();
@@ -174,17 +177,31 @@
   function updateTimerDisplays() {
     document.querySelectorAll('[data-timer-display]').forEach(display => {
       const id = Number(display.dataset.timerDisplay);
-      display.textContent = id === activeTimerId ? formatSeconds(activeTimerRemaining) : formatSeconds(selectedTimerSeconds);
+      const seconds = id === activeTimerId ? activeTimerRemaining : finishedTimerIds.has(id) ? 0 : selectedTimerSeconds;
+      const text = formatSeconds(seconds);
+      if (display.textContent !== text) display.textContent = text;
     });
   }
 
+  function syncTimerCard(card, id) {
+    const running = id === activeTimerId;
+    const finished = finishedTimerIds.has(id);
+    card.classList.toggle('timer-running', running);
+    card.classList.toggle('timer-finished', finished);
+    const button = card.querySelector(`[data-timer-id="${id}"]`);
+    if (!button) return;
+    const icon = running ? '■' : finished ? '↻' : '▶';
+    const label = running ? '停止' : finished ? 'もう一度' : '回答開始';
+    const [iconElement, labelElement] = button.querySelectorAll('span');
+    if (iconElement && iconElement.textContent !== icon) iconElement.textContent = icon;
+    if (labelElement && labelElement.textContent !== label) labelElement.textContent = label;
+  }
+
   function resetTimerCard(id) {
+    finishedTimerIds.delete(id);
     const card = document.getElementById(`q-${id}`);
-    card?.classList.remove('timer-running', 'timer-finished');
-    const button = card?.querySelector(`[data-timer-id="${id}"]`);
-    if (button) button.innerHTML = '<span aria-hidden="true">▶</span><span>回答開始</span>';
-    const display = card?.querySelector(`[data-timer-display="${id}"]`);
-    if (display) display.textContent = formatSeconds(selectedTimerSeconds);
+    if (card) syncTimerCard(card, id);
+    updateTimerDisplays();
   }
 
   function stopActiveTimer(reset = true) {
@@ -193,6 +210,7 @@
     const previousId = activeTimerId;
     activeTimerId = null;
     activeTimerRemaining = 0;
+    activeTimerEndsAt = 0;
     if (reset && previousId !== null) resetTimerCard(previousId);
   }
 
@@ -201,14 +219,20 @@
     timerInterval = null;
     activeTimerId = null;
     activeTimerRemaining = 0;
+    activeTimerEndsAt = 0;
+    finishedTimerIds.add(id);
     const card = document.getElementById(`q-${id}`);
-    card?.classList.remove('timer-running');
-    card?.classList.add('timer-finished');
-    const button = card?.querySelector(`[data-timer-id="${id}"]`);
-    if (button) button.innerHTML = '<span aria-hidden="true">↻</span><span>もう一度</span>';
-    const display = card?.querySelector(`[data-timer-display="${id}"]`);
-    if (display) display.textContent = '00:00';
+    if (card) syncTimerCard(card, id);
+    updateTimerDisplays();
     showToast('回答時間が終了しました');
+  }
+
+  function tickTimer() {
+    if (activeTimerId === null) return;
+    // Use elapsed time so background-tab throttling does not extend the answer limit.
+    activeTimerRemaining = Math.max(0, Math.ceil((activeTimerEndsAt - Date.now()) / 1000));
+    if (activeTimerRemaining === 0) finishTimer(activeTimerId);
+    else updateTimerDisplays();
   }
 
   function startTimer(id) {
@@ -219,19 +243,13 @@
     if (activeTimerId !== null) stopActiveTimer(true);
     const card = document.getElementById(`q-${id}`);
     if (!card) return;
-    card.classList.remove('timer-finished');
-    card.classList.add('timer-running');
+    finishedTimerIds.delete(id);
     activeTimerId = id;
     activeTimerRemaining = selectedTimerSeconds;
-    const button = card.querySelector(`[data-timer-id="${id}"]`);
-    if (button) button.innerHTML = '<span aria-hidden="true">■</span><span>停止</span>';
+    activeTimerEndsAt = Date.now() + selectedTimerSeconds * 1000;
+    syncTimerCard(card, id);
     updateTimerDisplays();
-    timerInterval = setInterval(() => {
-      activeTimerRemaining -= 1;
-      const display = document.querySelector(`[data-timer-display="${id}"]`);
-      if (display) display.textContent = formatSeconds(activeTimerRemaining);
-      if (activeTimerRemaining <= 0) finishTimer(id);
-    }, 1000);
+    timerInterval = setInterval(tickTimer, 1000);
   }
 
   function setMastery(id, level) {
@@ -331,9 +349,10 @@
     document.querySelectorAll('.category-section').forEach(section => {
       section.hidden = ![...section.querySelectorAll('.qa-card')].some(card => !card.hidden);
       const count = section.querySelector('.category-heading > span');
-      if (count && !section.hidden) count.textContent = '今回の質問';
+      if (count && !section.hidden && count.textContent !== '今回の質問') count.textContent = '今回の質問';
     });
-    if (resultSummary) resultSummary.textContent = sessionDone ? '模擬面接の振り返り' : `模擬面接：${sessionIndex + 1} / ${sessionIds.length}問`;
+    const summary = sessionDone ? '模擬面接の振り返り' : `模擬面接：${sessionIndex + 1} / ${sessionIds.length}問`;
+    if (resultSummary && resultSummary.textContent !== summary) resultSummary.textContent = summary;
     window.dispatchEvent(new Event('interview-session-step'));
   }
 
@@ -437,11 +456,17 @@
     saveOwnAnswer(Number(textarea.dataset.ownAnswerId), textarea.value);
   });
 
-  const observer = new MutationObserver(queueEnhance);
+  const observer = new MutationObserver(records => {
+    // Timer ticks, audio progress, and editor text do not introduce new cards.
+    const cardsAdded = records.some(record => [...record.addedNodes].some(node =>
+      node.nodeType === 1 && (node.matches('.qa-card') || node.querySelector('.qa-card'))));
+    if (cardsAdded) queueEnhance();
+  });
   observer.observe(questionSections, { childList: true, subtree: true });
 
   setTimerSeconds(selectedTimerSeconds);
   updateRandomUI();
   enhanceCards();
+  document.addEventListener('visibilitychange', tickTimer);
   window.addEventListener('beforeunload', () => stopActiveTimer(false));
 })();

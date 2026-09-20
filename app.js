@@ -87,6 +87,18 @@
     if (remainingCount) remainingCount.textContent = Math.max(data.length - practicedIds.size, 0);
   }
 
+  function updatePracticedCard(id) {
+    const card = document.getElementById(`q-${id}`);
+    const button = card?.querySelector('[data-practiced-id]');
+    const practiced = practicedIds.has(id);
+    card?.classList.toggle('is-practiced', practiced);
+    button?.classList.toggle('is-active', practiced);
+    button?.setAttribute('aria-pressed', String(practiced));
+    const label = button?.querySelector('.state-button__label');
+    const text = practiced ? '練習済み' : '未練習';
+    if (label && label.textContent !== text) label.textContent = text;
+  }
+
   function updateModeUI() {
     document.body.classList.toggle('practice-mode', practiceMode);
     normalModeButton?.classList.toggle('is-active', !practiceMode);
@@ -307,7 +319,8 @@
       const id = Number(practicedButton.dataset.practicedId);
       practicedIds.has(id) ? practicedIds.delete(id) : practicedIds.add(id);
       saveIdSet('interview-practiced', practicedIds);
-      renderQuestions();
+      updatePracticedCard(id);
+      updateStudyStats();
       showToast(practicedIds.has(id) ? '練習済みにしました' : '未練習に戻しました');
       return;
     }
@@ -342,11 +355,7 @@
     practicedIds.add(Number(event.detail.id));
     saveIdSet('interview-practiced', practicedIds);
     updateStudyStats();
-    const button = document.querySelector(`[data-practiced-id="${Number(event.detail.id)}"]`);
-    button?.setAttribute('aria-pressed', 'true');
-    button?.classList.add('is-active');
-    const label = button?.querySelector('.state-button__label');
-    if (label) label.textContent = '練習済み';
+    updatePracticedCard(Number(event.detail.id));
   });
   window.addEventListener('interview-session-step', requestScrollSync);
   window.addEventListener('interview-session-start', () => { revealedIds.clear(); renderQuestions(); });

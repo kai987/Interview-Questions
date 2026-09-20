@@ -2,6 +2,7 @@
 ---
 {% assign asset_version = site.github.build_revision | default: 'dev' %}
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4/+esm';
+import { queueLocalStateMigration } from './state-migration.js?v={{ asset_version }}';
 
 const SUPABASE_URL = 'https://flpmblfscgcbrprwwckz.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_l2Gja5i6yw4CLv54fJqvWg_01YKpu4Y';
@@ -23,6 +24,8 @@ let interviewSets = [];
 let activeSet = null;
 const stateCache = new Map();
 let stateSync = null;
+let privateDataReady = false;
+let loadFailure = null;
 
 const authButton = document.getElementById('authButton');
 const authDialog = document.getElementById('authDialog');
@@ -37,6 +40,33 @@ const setSelect = document.getElementById('interviewSetSelect');
 const activeSetTitle = document.getElementById('activeSetTitle');
 const activeSetMeta = document.getElementById('activeSetMeta');
 const heroCompany = document.getElementById('heroCompany');
+
+function showLoadFailure(scope) {
+  loadFailure = scope;
+  const notice = document.createElement('div');
+  notice.id = 'libraryLoadNotice';
+  notice.className = 'library-load-notice';
+  notice.setAttribute('role', 'alert');
+  const message = document.createElement('span');
+  message.textContent = scope === 'private'
+    ? '個人向け回答と学習状態を読み込めませんでした。質問は表示できます。接続を確認して再読み込みしてください。'
+    : '題庫を読み込めませんでした。接続を確認して、もう一度お試しください。';
+  const retry = document.createElement('button');
+  retry.id = 'retryLibraryLoad';
+  retry.type = 'button';
+  retry.textContent = '再読み込み';
+  retry.addEventListener('click', () => { retry.disabled = true; window.location.reload(); });
+  notice.append(message, retry);
+  document.querySelector('.interview-library-wrap')?.append(notice);
+  if (scope === 'library') {
+    if (activeSetTitle) activeSetTitle.textContent = '題庫の読み込みに失敗しました';
+    if (activeSetMeta) activeSetMeta.textContent = '接続を確認して再読み込みしてください';
+    if (!interviewSets.length) {
+      setSelect.replaceChildren(new Option('読み込みに失敗しました', ''));
+      setSelect.disabled = true;
+    }
+  }
+}
 
 function setAuthMessage(message, type = '') {
   if (!authMessage) return;
@@ -178,15 +208,18 @@ function readLocalState() {
   let practiced = [];
   let mastery = {};
   let ownAnswers = {};
+  let reviewHistory = {};
   try { favorites = JSON.parse(localStorage.getItem('interview-favorites') || '[]'); } catch {}
   try { practiced = JSON.parse(localStorage.getItem('interview-practiced') || '[]'); } catch {}
   try { mastery = JSON.parse(localStorage.getItem('interview-mastery') || '{}') || {}; } catch {}
   try { ownAnswers = JSON.parse(localStorage.getItem('interview-own-answers') || '{}') || {}; } catch {}
+  try { reviewHistory = JSON.parse(localStorage.getItem('interview-review-history') || '{}') || {}; } catch {}
   return {
     favorite: new Set((Array.isArray(favorites) ? favorites : []).map(Number)),
     practiced: new Set((Array.isArray(practiced) ? practiced : []).map(Number)),
     mastery,
-    ownAnswers
+    ownAnswers,
+    reviewHistory
   };
 }
 
@@ -220,32 +253,10 @@ function writeLocalState(rows) {
   localStorage.setItem('interview-review-history', JSON.stringify(reviewHistory));
 }
 
-async function migrateLocalStateIfNeeded(remoteRows) {
-  if (!session?.user?.id || (remoteRows || []).length) return remoteRows || [];
-  const local = readLocalState();
-  const rows = (window.INTERVIEW_DATA || []).map(item => {
-    const id = Number(item.id);
-    return {
-      user_id: session.user.id,
-      question_id: id,
-      favorite: local.favorite.has(id),
-      practiced: local.practiced.has(id),
-      mastery: local.mastery[id] || null,
-      own_answer: local.ownAnswers[id] || ''
-    };
-  }).filter(row => row.favorite || row.practiced || row.mastery || row.own_answer);
-
-  if (!rows.length) return [];
-  const { error } = await supabase.from('interview_user_state').upsert(rows, { onConflict: 'user_id,question_id' });
-  if (error) console.warn('Could not migrate local interview state:', error.message);
-  return rows;
-}
-
 async function loadPrivateData() {
   if (!session?.user?.id) return;
   const currentIds = new Set((window.INTERVIEW_DATA || []).map(item => Number(item.id)));
   if (!currentIds.size) {
-    writeLocalState([]);
     return;
   }
 
@@ -259,8 +270,8 @@ async function loadPrivateData() {
   const scopedContent = (contentResult.data || []).filter(row => currentIds.has(Number(row.question_id)));
   const scopedState = (stateResult.data || []).filter(row => currentIds.has(Number(row.question_id)));
   mergePrivateContent(scopedContent);
-  const migratedRows = await migrateLocalStateIfNeeded(scopedState);
-  const merged = new Map((migratedRows.length ? migratedRows : scopedState).map(row => [Number(row.question_id), row]));
+  queueLocalStateMigration({ questionIds: currentIds, remoteRows: scopedState, local: readLocalState(), sync: stateSync });
+  const merged = new Map(scopedState.map(row => [Number(row.question_id), row]));
   for (const row of stateSync?.pendingRows() || []) {
     if (currentIds.has(row.question_id)) merged.set(row.question_id, { ...merged.get(row.question_id), ...row });
   }
@@ -272,13 +283,18 @@ function clearPrivateLocalState() {
 }
 
 function saveState(questionId, patch, options = {}) {
-  if (!session?.user?.id || !stateSync) return;
+  if (!session?.user?.id || !stateSync || !privateDataReady) return;
   const id = Number(questionId);
+  // Only send fields this action changed; another tab may have newer values
+  // for the other fields of the same question.
+  const allowed = ['favorite', 'practiced', 'mastery', 'own_answer', 'last_practiced_at'];
+  const changes = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.includes(key)));
+  if ('own_answer' in changes) changes.own_answer = String(changes.own_answer || '').slice(0, 20000);
+  if (!Object.keys(changes).length) return;
   const current = stateCache.get(id) || { favorite: false, practiced: false, mastery: null, own_answer: '', last_practiced_at: null };
-  const next = { ...current, ...patch };
-  next.own_answer = String(next.own_answer || '').slice(0, 20000);
+  const next = { ...current, ...changes };
   stateCache.set(id, next);
-  stateSync.save(id, next, options);
+  stateSync.save(id, changes, options);
 }
 
 window.InterviewPrivateStore = {
@@ -287,6 +303,7 @@ window.InterviewPrivateStore = {
   retry: () => stateSync?.retry(),
   hasPending: () => stateSync?.hasPending() || false,
   isAuthenticated: () => Boolean(session),
+  isReady: () => privateDataReady,
   openLogin: openAuthDialog
 };
 
@@ -362,10 +379,22 @@ if (session?.user?.id) {
   const { createStateSync } = await import('./sync-store.js?v={{ asset_version }}');
   stateSync = createStateSync({
     storage: localStorage, ownerId,
-    async send(id, row) {
+    async send(id, row, { migration = {}, changes = row } = {}) {
       if (session?.user?.id !== ownerId) throw new Error('Account changed');
-      const { error } = await supabase.from('interview_user_state').upsert({ ...row, user_id: ownerId, question_id: id }, { onConflict: 'user_id,question_id' });
-      if (error) throw error;
+      // A legacy UI cache only fills a missing cloud row. It cannot replace an
+      // edit another tab/device already saved after our initial read.
+      if (Object.keys(migration).length) {
+        const { error } = await supabase.from('interview_user_state').upsert(
+          { ...migration, user_id: ownerId, question_id: id },
+          { onConflict: 'user_id,question_id', ignoreDuplicates: true });
+        if (error) throw error;
+      }
+      if (Object.keys(changes).length) {
+        if (session?.user?.id !== ownerId) throw new Error('Account changed');
+        const { error } = await supabase.from('interview_user_state').upsert(
+          { ...changes, user_id: ownerId, question_id: id }, { onConflict: 'user_id,question_id' });
+        if (error) throw error;
+      }
     },
     notify(id, status) { window.dispatchEvent(new CustomEvent('interview-sync', { detail: { id, status } })); }
   });
@@ -375,13 +404,19 @@ if (session?.user?.id) {
 
 try {
   await loadInterviewLibrary();
-  if (session) await loadPrivateData();
 } catch (error) {
   console.warn('Could not load interview library:', error?.message || error);
   window.INTERVIEW_DATA = [];
-  interviewSets = [];
-  activeSet = null;
-  renderSetSwitcher();
+  showLoadFailure('library');
+}
+if (!loadFailure && session) {
+  try {
+    await loadPrivateData();
+    privateDataReady = true;
+  } catch (error) {
+    console.warn('Could not load private interview content:', error?.message || error);
+    showLoadFailure('private');
+  }
 }
 
 supabase.auth.onAuthStateChange((event, nextSession) => {
@@ -411,5 +446,9 @@ await import('./privacy-ui.js?v={{ asset_version }}');
 bootComplete = true;
 document.body.classList.toggle('private-mode-unlocked', Boolean(session));
 document.body.classList.toggle('guest-mode', !session);
+if (loadFailure === 'library') {
+  document.getElementById('emptyState').hidden = true;
+  document.getElementById('resultSummary').textContent = '題庫を読み込めませんでした';
+}
 
 void stateSync?.retry();
