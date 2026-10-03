@@ -6,6 +6,7 @@
   const AUDIO_BUCKET = 'interview-audio';
 
   let speakingId = null;
+  let activePlaybackKey = null;
   let playbackRequest = 0;
   let activeAudio = null;
   let activeProgressNote = null;
@@ -16,6 +17,7 @@
   let audioPlayAttempt = 0;
   const privateAudioCache = new Map();
   const audioPreviews = new Map();
+  const recordingPreviews = new Map();
 
   function activeSetSlug() {
     return String(window.InterviewLibrary?.activeSet?.slug || '').trim();
@@ -89,6 +91,7 @@
     activeUtterance = null;
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     speakingId = null;
+    activePlaybackKey = null;
     resetSpeechButtons();
   }
 
@@ -150,32 +153,67 @@
     return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  async function verifiedRevision(item) {
-    if (!item.answer || !item.audioTextHash || !crypto.subtle) return null;
-    const parts = item.audioTextHash.split(':');
-    const legacy = parts[0] === 'legacy';
-    const hash = legacy ? parts[1] : parts[0];
-    if (!/^[a-f0-9]{64}$/.test(hash || '')) return null;
-    if (await sha256(new TextEncoder().encode(item.question + '\n' + item.answer)) !== hash) return null;
-    return { hash, legacy, bytes: legacy ? parts[2] : null };
+  function selectedAnswer(item) {
+    return window.InterviewAnswers?.text(item) ?? item.answer;
   }
 
-  async function resolveLocalAudio(item) {
+  function previewKey(item) {
+    return JSON.stringify([activeSetSlug(), item.id, item.question, selectedAnswer(item),
+      window.InterviewAnswers?.selected(item) || 'full', item.audioVariants,
+      item.audioTextHash, item.audioDurationSeconds]);
+  }
+
+  function parseRecording(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const encoded = String(value.audio_text_hash || '');
+    const legacy = encoded.match(/^legacy:([a-f0-9]{64}):([a-f0-9]{64})$/);
+    const hash = legacy ? legacy[1] : encoded;
+    if (!/^[a-f0-9]{64}$/.test(hash)) return null;
+    const bytes = value.audio_sha256 || legacy?.[2] || null;
+    if (bytes && (!/^[a-f0-9]{64}$/.test(bytes) || (legacy && bytes !== legacy[2]))) return null;
+    const duration = Number(value.duration_seconds);
+    return { hash, bytes, legacy: Boolean(legacy), duration: Number.isFinite(duration) && duration > 0 ? duration : NaN };
+  }
+
+  function verifiedRecording(item) {
+    const key = previewKey(item);
+    if (recordingPreviews.has(key)) return recordingPreviews.get(key);
+    const answer = selectedAnswer(item);
+    const selected = window.InterviewAnswers?.selected(item) || 'full';
+    const variants = item.audioVariants || {};
+    // Identical prose can share one recording, including standard === full.
+    // Legacy flat fields remain a fallback for previously registered full audio.
+    const candidates = [variants[selected], variants.full,
+      { audio_text_hash: item.audioTextHash, duration_seconds: item.audioDurationSeconds },
+      variants.short, variants.standard].map(parseRecording).filter(Boolean);
+    const pending = (async () => {
+      if (!answer || !crypto.subtle) return null;
+      const hash = await sha256(new TextEncoder().encode(item.question + '\n' + answer));
+      return candidates.find(candidate => candidate.hash === hash) || null;
+    })().catch(() => null);
+    recordingPreviews.set(key, pending);
+    return pending;
+  }
+
+  function recordingFilename(item, recording) {
+    return recording.legacy ? `q${Number(item.id)}.mp3` : `q${Number(item.id)}-${recording.hash}.mp3`;
+  }
+
+  async function resolveLocalAudio(item, recording) {
     if (!isLocalDevelopment()) return null;
     const slug = activeSetSlug();
     if (!slug) return null;
 
-    const revision = await verifiedRevision(item);
-    if (!revision?.bytes) return null;
-    const relative = `local-audio/${encodeURIComponent(slug)}/q${Number(item.id)}.mp3`;
+    if (!recording.bytes) return null;
+    const relative = `local-audio/${encodeURIComponent(slug)}/${recordingFilename(item, recording)}`;
     const url = new URL(relative, document.baseURI).href;
     try {
-      const cacheKey = 'local:' + url + ':' + item.audioTextHash;
+      const cacheKey = 'local:' + url + ':' + recording.bytes;
       if (privateAudioCache.has(cacheKey)) return privateAudioCache.get(cacheKey);
       const response = await fetch(url, { cache: 'no-store' });
       if (!response.ok) return null;
       const blob = await response.blob();
-      if (await sha256(await blob.arrayBuffer()) !== revision.bytes) return null;
+      if (await sha256(await blob.arrayBuffer()) !== recording.bytes) return null;
       const objectUrl = URL.createObjectURL(blob);
       privateAudioCache.set(cacheKey, objectUrl);
       return objectUrl;
@@ -184,7 +222,7 @@
     }
   }
 
-  async function resolvePrivateStorageAudio(item) {
+  async function resolvePrivateStorageAudio(item, recording) {
     const session = readBrowserSession();
     const accessToken = String(session?.access_token || '').trim();
     if (!accessToken) return null;
@@ -194,11 +232,9 @@
     const userId = String(session?.user?.id || jwtSubject(accessToken) || '').trim();
     if (!userId) return null;
 
-    const revision = await verifiedRevision(item);
-    if (!revision) return null;
-    const filename = revision.legacy ? `q${Number(item.id)}.mp3` : `q${Number(item.id)}-${revision.hash}.mp3`;
+    const filename = recordingFilename(item, recording);
     const objectPath = `${userId}/${slug}/${filename}`;
-    const cacheKey = objectPath + ':' + item.audioTextHash;
+    const cacheKey = objectPath + ':' + (recording.bytes || recording.hash);
     if (privateAudioCache.has(cacheKey)) return privateAudioCache.get(cacheKey);
 
     const encodedPath = objectPath.split('/').map(part => encodeURIComponent(part)).join('/');
@@ -224,7 +260,7 @@
 
       const blob = await response.blob();
       if (!blob.size) return null;
-      if (revision.bytes && await sha256(await blob.arrayBuffer()) !== revision.bytes) return null;
+      if (recording.bytes && await sha256(await blob.arrayBuffer()) !== recording.bytes) return null;
       const objectUrl = URL.createObjectURL(blob);
       privateAudioCache.set(cacheKey, objectUrl);
       return objectUrl;
@@ -234,50 +270,25 @@
     }
   }
 
-  async function resolveAudioSource(item) {
-    const local = await resolveLocalAudio(item);
+  async function resolveAudioSource(item, recording) {
+    const local = await resolveLocalAudio(item, recording);
     if (local) return { url: local, source: 'local' };
 
-    const storage = await resolvePrivateStorageAudio(item);
+    const storage = await resolvePrivateStorageAudio(item, recording);
     if (storage) return { url: storage, source: 'storage' };
 
     return null;
-  }
-
-  function previewKey(item) {
-    return JSON.stringify([activeSetSlug(), item.id, item.audioTextHash, item.audioDurationSeconds, item.question,
-      window.InterviewAnswers?.text(item) ?? item.answer]);
-  }
-
-  function savedDuration(item) {
-    const duration = Number(item.audioDurationSeconds);
-    return Number.isFinite(duration) && duration > 0 ? duration : null;
   }
 
   function prepareAudio(item) {
     const key = previewKey(item);
     if (audioPreviews.has(key)) return audioPreviews.get(key);
     const pending = (async () => {
-      if ((window.InterviewAnswers?.text(item) ?? item.answer) !== item.answer) return null;
-      const source = await resolveAudioSource(item);
+      const recording = await verifiedRecording(item);
+      if (!recording) return null;
+      const source = await resolveAudioSource(item, recording);
       if (!source) return null;
-      if (savedDuration(item)) return { ...source, duration: savedDuration(item) };
-      const duration = await new Promise(resolve => {
-        const probe = new Audio();
-        const finish = () => {
-          clearTimeout(timeout);
-          const duration = probe.duration;
-          probe.onloadedmetadata = probe.onerror = null;
-          probe.removeAttribute('src');
-          probe.load();
-          resolve(duration);
-        };
-        const timeout = setTimeout(finish, 10000);
-        probe.onloadedmetadata = probe.onerror = finish;
-        probe.preload = 'metadata';
-        probe.src = source.url;
-      });
-      return { ...source, duration };
+      return { ...source, duration: recording.duration };
     })();
     audioPreviews.set(key, pending);
     // Allow a failed request to be retried when the user presses Play.
@@ -294,23 +305,21 @@
       if (!item || !note) return;
       const key = previewKey(item);
       if (card.dataset.audioPreviewKey !== key) {
+        if (speakingId === item.id && activePlaybackKey !== key) stopPlayback();
         card.dataset.audioPreviewKey = key;
         delete card.dataset.audioPreviewLoaded;
         showAudioProgress({ currentTime: 0, duration: NaN }, note);
         note.title = '音声の長さを確認中';
       }
       if (card.dataset.audioPreviewLoaded === key) return;
-      const duration = savedDuration(item);
-      if (!duration && (!card.open || card.hidden)) return;
       card.dataset.audioPreviewLoaded = key;
-      const preview = duration
-        ? Promise.resolve((window.InterviewAnswers?.text(item) ?? item.answer) === item.answer
-          ? verifiedRevision(item) : null).then(revision => revision ? { duration } : null)
-        : prepareAudio(item);
+      // Saved durations are available without downloading or probing any audio.
+      const preview = verifiedRecording(item);
       void preview.then(source => {
         if (!card.isConnected || card.dataset.audioPreviewKey !== key || speakingId === item.id) return;
         showAudioProgress({ currentTime: 0, duration: source?.duration ?? NaN }, note);
-        note.title = source ? '再生時間 / 音声の長さ' : 'ブラウザ音声は長さの事前取得・位置指定に対応していません';
+        note.title = source ? (Number.isFinite(source.duration) ? '再生時間 / 音声の長さ' : '再生時に音声の長さを確認します')
+          : 'ブラウザ音声は長さの事前取得・位置指定に対応していません';
       });
     });
   }
@@ -349,7 +358,8 @@
   }
 
   async function play(item, button) {
-    if (speakingId === item.id) {
+    const key = previewKey(item);
+    if (speakingId === item.id && activePlaybackKey === key) {
       if (playbackPaused) await resumePlayback(button);
       else if (activeAudio || activeUtterance) pausePlayback(button);
       else stopPlayback(); // A second click while resolving the source cancels loading.
@@ -361,6 +371,7 @@
     const initialTime = Number(slider?.value) || 0;
     stopPlayback();
     speakingId = item.id;
+    activePlaybackKey = key;
     setButtonState(button, '読込中…');
 
     const request = playbackRequest;
@@ -487,6 +498,7 @@
     isLocalDevelopment,
     clearCache() {
       audioPreviews.clear();
+      recordingPreviews.clear();
       privateAudioCache.forEach(url => URL.revokeObjectURL(url));
       privateAudioCache.clear();
     }

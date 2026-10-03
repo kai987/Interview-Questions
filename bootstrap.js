@@ -199,6 +199,8 @@ function mergePrivateContent(rows) {
     item.answerVariants = row.answer_variants || {};
     item.audioTextHash = row.audio_text_hash || '';
     item.audioDurationSeconds = row.duration_seconds ?? null;
+    item.audioVariants = row.audio_variants && typeof row.audio_variants === 'object' && !Array.isArray(row.audio_variants)
+      ? row.audio_variants : {};
     item.privateUnlocked = true;
   });
 }
@@ -261,7 +263,7 @@ async function loadPrivateData() {
   }
 
   const [contentResult, stateResult] = await Promise.all([
-    supabase.from('interview_private_content').select('question_id,answer,outline,tags,answer_variants,audio_text_hash,duration_seconds').order('question_id'),
+    supabase.from('interview_private_content').select('question_id,answer,outline,tags,answer_variants,audio_text_hash,duration_seconds,audio_variants').order('question_id'),
     supabase.from('interview_user_state').select('question_id,favorite,practiced,mastery,own_answer,last_practiced_at').order('question_id')
   ]);
   if (contentResult.error) throw contentResult.error;

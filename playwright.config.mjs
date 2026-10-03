@@ -10,7 +10,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
-  // The lightweight Python static server has a small connection backlog.
+  // Keep media timing deterministic while local speech generation may be active.
   workers: 1,
   reporter: 'list',
   outputDir: process.env.E2E_OUTPUT_DIR || join(tmpdir(), 'interview-questions-playwright'),

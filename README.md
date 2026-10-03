@@ -73,11 +73,13 @@ python3 scripts/serve_local.py --port 8000
 - Web Locks が利用できないブラウザでも端末の未同期記録は個別に保持しますが、複数タブからの送信順序は保証しません。同じフィールドを複数端末から編集した場合の履歴・競合解決機能はありません。
 - 「端末保存済み」と「クラウドに保存済み」を分けています。未同期データが残る場合は、明示的なログアウト前に再送します。ブラウザデータの削除や複数端末の同時編集に対する履歴・競合解決機能ではありません。
 - 回答例は `answer_variants.short` / `answer_variants.standard` / 既存の `answer`（全文）を切り替えます。30秒・60秒は目安です。逆質問は時間別回答へ変換しません。
-- 短縮版はブラウザ音声で読み上げます。録音は、質問と全文のSHA-256が登録値と一致した場合のみ再生します。
+- 短縮版・標準版・全文それぞれの録音と実測時長を使用します。録音は、質問と現在選択中の回答のSHA-256が登録値と一致した場合のみ再生します。同じ本文の版は録音を共用し、未生成の版はブラウザ音声へ切り替わります。
 
 2026-09-08 に Supabase migration `interview_practice_variants_and_review` を適用しました（既存RLSを維持）。再構築時に必要な追加列：
 
-2026-09-13 に `add_interview_audio_duration_seconds` を適用し、既存の録音61件へ測定済みの時長を補完しました。`duration_seconds` は生成・アップロード時に音声ハッシュと一緒に登録され、画面は音声をダウンロードせず総時間を表示します。未登録の場合のみ従来のメタデータ読込を使用します。
+2026-09-13 に `add_interview_audio_duration_seconds` を適用し、既存の録音61件へ測定済みの時長を補完しました。`duration_seconds` は生成・アップロード時に音声ハッシュと一緒に登録され、画面は音声をダウンロードせず総時間を表示します。
+
+2026-10-03 に `add_private_audio_variants` を適用しました。`audio_variants` は `short` / `standard` / `full` ごとに `audio_text_hash`、`audio_sha256`、実測の `duration_seconds` を保持します。既存の全文フィールドも引き続き読み込みます。録音未登録・本文変更後の旧録音は `--:--` と表示し、推定時間を実測値として表示しません。既存の本人限定RLSは維持します。新しいフロントエンドを配信する前に、この列を追加してください。
 
 ```sql
 alter table public.interview_private_content
@@ -86,6 +88,9 @@ alter table public.interview_private_content
 alter table public.interview_private_content
   add column if not exists duration_seconds numeric(12,6)
   check (duration_seconds > 0 and duration_seconds < 'Infinity'::numeric);
+alter table public.interview_private_content
+  add column if not exists audio_variants jsonb not null default '{}'::jsonb
+  check (jsonb_typeof(audio_variants) = 'object');
 alter table public.interview_user_state
   add column if not exists last_practiced_at timestamptz;
 ```

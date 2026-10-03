@@ -340,7 +340,7 @@ def upload_mp3(
 
 def filename_matches_mode(filename: str, mode: str) -> bool:
     if mode == "combined":
-        return bool(re.fullmatch(r"q\d+\.mp3", filename))
+        return bool(re.fullmatch(r"q\d+(?:-[a-f0-9]{64})?\.mp3", filename))
     if mode == "split":
         return bool(re.fullmatch(r"q\d+-(question|answer)\.mp3", filename))
     if mode == "question":
@@ -358,6 +358,10 @@ def upload_local_audio(
 ) -> int:
     if not args.set_slug:
         raise core.CliError("--set is required for Storage upload.")
+    core.validate_set_slug(args.set_slug)
+    if getattr(args, "input_json", None):
+        raise core.CliError("Upload requires authenticated live data, not --input-json.")
+    variant = core.selected_answer_variant(args)
 
     user_id = jwt_subject(access_token)
     if not user_id:
@@ -373,52 +377,46 @@ def upload_local_audio(
     except (OSError, json.JSONDecodeError) as error:
         raise core.CliError(f"Could not read audio manifest: {manifest_path}") from error
 
-    entries: list[tuple[str, dict[str, Any]]] = []
-    for filename, metadata in (manifest.get("files") or {}).items():
-        if not filename_matches_mode(filename, args.mode):
-            continue
-        if not isinstance(metadata, dict):
-            continue
-        qid = int(metadata.get("question_id") or 0)
-        order = int(metadata.get("sort_order") or 0)
-        if args.question_id and qid not in set(args.question_id):
-            continue
-        if args.sort_order and order not in set(args.sort_order):
-            continue
-        file_path = set_dir / filename
-        if file_path.is_file():
-            entries.append((filename, metadata))
-
-    entries.sort(key=lambda item: (int(item[1].get("sort_order") or 0), item[0]))
-
-    if args.limit is not None:
-        allowed_orders: list[int] = []
-        for _, metadata in entries:
-            order = int(metadata.get("sort_order") or 0)
-            if order not in allowed_orders:
-                allowed_orders.append(order)
-            if len(allowed_orders) >= args.limit:
+    _, current_rows = core.load_interview_set(args.supabase_url, args.supabase_key, access_token, args.set_slug)
+    selected = core.select_questions(current_rows, args)
+    entries = []
+    durations_changed = False
+    for row in selected:
+        qid = int(row["id"])
+        for target in core.audio_targets(row, args.mode, variant):
+            versioned = Path(target["filename"]).with_suffix(".mp3").name
+            names = [versioned, f"q{qid}.mp3"] if args.mode == "combined" else [versioned]
+            match = None
+            for filename in names:
+                metadata = (manifest.get("files") or {}).get(filename)
+                path = set_dir / filename
+                if not isinstance(metadata, dict) or not path.is_file():
+                    continue
+                if metadata.get("question_id") != qid or metadata.get("source_hash") != target["source_hash"]:
+                    continue
+                if metadata.get("audio_sha256") != hashlib.sha256(path.read_bytes()).hexdigest():
+                    raise core.CliError(f"Audio bytes do not match the manifest: {filename}. Generate it again before uploading.")
+                match = (filename, metadata)
                 break
-        entries = [item for item in entries if int(item[1].get("sort_order") or 0) in allowed_orders]
-
+            if match is None:
+                print(f"SKIP  q{qid} {'/'.join(target['answer_variants'])}: no verified audio for the current text")
+                continue
+            filename, metadata = match
+            # Never trust a stored/estimated duration over the final MP3 bytes.
+            measured = core.audio_duration_seconds(set_dir / filename)
+            durations_changed |= metadata.get("duration_seconds") != measured
+            metadata["duration_seconds"] = measured
+            entries.append((row, target, filename, versioned, metadata))
     if not entries:
-        raise core.CliError("No generated MP3 files matched the requested upload filters.")
-
+        raise core.CliError("No verified MP3 matches the current answers and upload filters. Generate audio first.")
+    if durations_changed:
+        core.save_manifest(manifest_path, manifest)
     print(f"Storage bucket: {bucket}")
     print(f"Upload files: {len(entries)}")
-    _, current_rows = core.load_interview_set(args.supabase_url, args.supabase_key, access_token, args.set_slug)
-    current = {int(row["id"]): row for row in current_rows}
     uploaded = 0
-    for filename, metadata in entries:
+    registrations: dict[int, dict[str, Any]] = {}
+    for row, target, filename, versioned, metadata in entries:
         file_path = set_dir / filename
-        row = current.get(int(metadata["question_id"]))
-        digest = hashlib.sha256((row["question"] + "\n" + row["answer"]).encode("utf-8")).hexdigest() if row else None
-        if not digest or metadata.get("source_hash") != digest or metadata.get("audio_sha256") != hashlib.sha256(file_path.read_bytes()).hexdigest():
-            raise core.CliError(f"Audio does not match the current answer: {filename}. Generate it again before uploading.")
-        metadata["duration_seconds"] = core.audio_duration_seconds(file_path)
-        core.save_manifest(manifest_path, manifest)
-        combined = filename == f"q{row['id']}.mp3"
-        versioned = f"q{row['id']}-{digest}.mp3" if combined else filename
         object_path = f"{user_id}/{args.set_slug}/{versioned}"
         print(f"UPLOAD {filename} -> {object_path}")
         upload_mp3(
@@ -429,13 +427,38 @@ def upload_local_audio(
             object_path=object_path,
             file_path=file_path,
         )
-        if combined and bucket == DEFAULT_STORAGE_BUCKET:
-            core.http_request(
-                core.api_url(args.supabase_url, '/rest/v1/interview_private_content', {'user_id': f'eq.{user_id}', 'question_id': f"eq.{row['id']}"}),
-                method='PATCH', headers={'apikey': args.supabase_key, 'Authorization': f'Bearer {access_token}'},
-                json_body={'audio_text_hash': digest, 'duration_seconds': metadata['duration_seconds']},
-            )
+        if args.mode == "combined" and bucket == DEFAULT_STORAGE_BUCKET:
+            by_variant = registrations.setdefault(int(row["id"]), {})
+            # The object key is shared by every equal-text variant. A new voice
+            # or encoding replaces its bytes, so update every alias's byte hash.
+            for name in core.ANSWER_VARIANTS:
+                if core.source_hash(row, name) != target["source_hash"]:
+                    continue
+                by_variant[name] = {"audio_text_hash": target["source_hash"], "audio_sha256": metadata["audio_sha256"], "duration_seconds": metadata["duration_seconds"]}
         uploaded += 1
+
+    if registrations:
+        # Re-read after the potentially long upload. Preserve metadata for other
+        # variants and refuse registration if the text changed in the meantime.
+        _, latest_rows = core.load_interview_set(args.supabase_url, args.supabase_key, access_token, args.set_slug)
+        latest = {int(row["id"]): row for row in latest_rows}
+        for qid, by_variant in registrations.items():
+            row = latest.get(qid)
+            if not row or any(core.source_hash(row, name) != metadata["audio_text_hash"] for name, metadata in by_variant.items()):
+                raise core.CliError(f"Question {qid} changed during upload; audio metadata was not registered. Generate current audio again.")
+        for qid, by_variant in registrations.items():
+            existing = latest[qid].get("audio_variants")
+            merged = {**(existing if isinstance(existing, dict) else {}), **by_variant}
+            payload = {"audio_variants": merged}
+            if "full" in by_variant:
+                payload.update({"audio_text_hash": by_variant["full"]["audio_text_hash"], "duration_seconds": by_variant["full"]["duration_seconds"]})
+            saved = core.http_request(
+                core.api_url(args.supabase_url, '/rest/v1/interview_private_content', {'user_id': f'eq.{user_id}', 'question_id': f"eq.{qid}"}),
+                method='PATCH', headers={'apikey': args.supabase_key, 'Authorization': f'Bearer {access_token}', 'Prefer': 'return=representation'},
+                json_body=payload,
+            )
+            if not isinstance(saved, list) or len(saved) != 1 or saved[0].get("question_id") != qid:
+                raise core.CliError(f"Audio files uploaded, but metadata registration for question {qid} was not confirmed.")
 
     print(f"Upload complete. Uploaded: {uploaded}")
     return uploaded
@@ -473,6 +496,9 @@ def main() -> int:
 
     core_args = core.build_parser().parse_args(remaining)
     core.get_supabase_token = passwordless_get_supabase_token
+
+    if core_args.input_json and (launcher_args.upload or launcher_args.upload_only):
+        raise core.CliError("--input-json is for local generation only. Upload separately without --input-json to revalidate authenticated live data.")
 
     if launcher_args.upload_only:
         token = passwordless_get_supabase_token(core_args.supabase_url, core_args.supabase_key, core_args.access_token)

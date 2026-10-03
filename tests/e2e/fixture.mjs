@@ -5,19 +5,23 @@ const answer = '実務での経験と学習した技術について説明しま�
 const sha256 = data => createHash('sha256').update(data).digest('hex');
 
 // Deterministic silent audio; no private recordings or live account are used.
-const audio = Buffer.alloc(44 + 24000 * 2 * 20);
-audio.write('RIFF');
-audio.writeUInt32LE(audio.length - 8, 4);
-audio.write('WAVEfmt ', 8);
-audio.writeUInt32LE(16, 16);
-audio.writeUInt16LE(1, 20);
-audio.writeUInt16LE(1, 22);
-audio.writeUInt32LE(24000, 24);
-audio.writeUInt32LE(48000, 28);
-audio.writeUInt16LE(2, 32);
-audio.writeUInt16LE(16, 34);
-audio.write('data', 36);
-audio.writeUInt32LE(audio.length - 44, 40);
+export function makeAudioFixture(seconds = 20) {
+  const audio = Buffer.alloc(44 + 24000 * 2 * seconds);
+  audio.write('RIFF');
+  audio.writeUInt32LE(audio.length - 8, 4);
+  audio.write('WAVEfmt ', 8);
+  audio.writeUInt32LE(16, 16);
+  audio.writeUInt16LE(1, 20);
+  audio.writeUInt16LE(1, 22);
+  audio.writeUInt32LE(24000, 24);
+  audio.writeUInt32LE(48000, 28);
+  audio.writeUInt16LE(2, 32);
+  audio.writeUInt16LE(16, 34);
+  audio.write('data', 36);
+  audio.writeUInt32LE(audio.length - 44, 40);
+  return audio;
+}
+const audio = makeAudioFixture();
 
 const questions = Array.from({ length: 12 }, (_, index) => ({
   id: index + 1,
@@ -71,6 +75,10 @@ export const test = base.extend({
     const failures = new Map();
     const remoteState = new Map();
     const failedQuestionIds = new Set();
+    const privateContent = new Map(tables.interview_private_content.map(row => [row.question_id, structuredClone(row)]));
+    const audioFiles = new Map();
+    const audioPaths = [];
+    let rejectLocalAudio = false;
     let saveFailure = false;
     let audioRequests = 0;
     function watch(tab) {
@@ -78,7 +86,8 @@ export const test = base.extend({
       tab.on('console', message => {
         if (!['error', 'warning'].includes(message.type())) return;
         if ([...allowedWarnings].some(prefix => message.text().startsWith(prefix))) return;
-        errors.push(message.text());
+        const url = message.location().url;
+        errors.push(url ? `${message.text()} (${url})` : message.text());
       });
     }
     watch(page);
@@ -98,6 +107,12 @@ export const test = base.extend({
       if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.startsWith('/npm/@supabase/supabase-js@')) {
         return route.fulfill({ contentType: 'application/javascript', body: sdk });
       }
+      if (url.hostname === 'flpmblfscgcbrprwwckz.supabase.co'
+        && url.pathname.startsWith('/storage/v1/object/authenticated/interview-audio/e2e-synthetic-user/e2e-fixture/')) {
+        audioRequests += 1;
+        audioPaths.push(url.pathname);
+        return route.fulfill({ contentType: 'audio/wav', body: audioFiles.get(url.pathname.split('/').at(-1)) || audio });
+      }
       if (url.origin !== baseURL) {
         unexpectedRequests.push(url.origin + url.pathname);
         return route.abort();
@@ -109,7 +124,8 @@ export const test = base.extend({
         return route.fulfill({
           json: remaining
             ? { data: null, error: { message: `Synthetic ${table} failure` } }
-            : { data: table === 'interview_user_state' ? [...remoteState.values()] : tables[table] || [], error: null }
+            : { data: table === 'interview_user_state' ? [...remoteState.values()]
+              : table === 'interview_private_content' ? [...privateContent.values()] : tables[table] || [], error: null }
         });
       }
       if (url.pathname === '/__e2e__/state') {
@@ -126,7 +142,9 @@ export const test = base.extend({
       }
       if (url.pathname.includes('/local-audio/')) {
         audioRequests += 1;
-        return route.fulfill({ contentType: 'audio/wav', body: audio });
+        audioPaths.push(url.pathname);
+        return route.fulfill({ contentType: 'audio/wav', body: rejectLocalAudio ? Buffer.from('invalid local file')
+          : audioFiles.get(url.pathname.split('/').at(-1)) || audio });
       }
       return route.continue();
     });
@@ -142,6 +160,12 @@ export const test = base.extend({
       setSaveFailure(value) { saveFailure = value; },
       failQuestionSave(id, value = true) { value ? failedQuestionIds.add(id) : failedQuestionIds.delete(id); },
       setRemoteState(row) { remoteState.set(row.question_id, structuredClone(row)); },
+      getPrivateContent(id) { return structuredClone(privateContent.get(id)); },
+      setPrivateContent(id, patch) { privateContent.set(id, { ...privateContent.get(id), ...structuredClone(patch) }); },
+      getQuestion(id) { return structuredClone(questions.find(question => question.id === id)); },
+      setAudioFile(filename, bytes) { audioFiles.set(filename, bytes); },
+      rejectLocalAudio(value = true) { rejectLocalAudio = value; },
+      get audioPaths() { return [...audioPaths]; },
       allowWarning(prefix) { allowedWarnings.add(prefix); },
       get audioRequests() { return audioRequests; }
     });

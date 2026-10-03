@@ -63,13 +63,17 @@ class AudioDurationTests(unittest.TestCase):
                                   supabase_url="https://example.test", supabase_key="test-key")
         with patch.object(launcher, "jwt_subject", return_value="test-user"), patch.object(
             core, "load_interview_set", return_value=({}, [row])
-        ), patch.object(launcher, "upload_mp3") as upload, patch.object(core, "http_request") as request:
+        ), patch.object(launcher, "upload_mp3") as upload, patch.object(core, "http_request", return_value=[{"question_id": 1}]) as request:
             self.assertEqual(launcher.upload_local_audio(args, access_token="test-token", bucket=launcher.DEFAULT_STORAGE_BUCKET), 1)
         measured = core.audio_duration_seconds(mp3)
         self.assertGreaterEqual(measured, 0.5)
         self.assertLess(measured, 1)
         upload.assert_called_once()
-        self.assertEqual(request.call_args.kwargs["json_body"], {"audio_text_hash": digest, "duration_seconds": measured})
+        registered = {"audio_text_hash": digest, "audio_sha256": metadata["audio_sha256"], "duration_seconds": measured}
+        self.assertEqual(request.call_args.kwargs["json_body"], {
+            "audio_text_hash": digest, "duration_seconds": measured,
+            "audio_variants": {name: registered for name in core.ANSWER_VARIANTS},
+        })
         self.assertEqual(json.loads(manifest.read_text())["files"]["q1.mp3"]["duration_seconds"], measured)
 
 

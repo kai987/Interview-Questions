@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -175,7 +176,7 @@ def load_interview_set(
         raise CliError(f"No active questions found for: {slug}")
 
     ids = [int(row["id"]) for row in questions]
-    answers_by_id: dict[int, str] = {}
+    answers_by_id: dict[int, dict[str, Any]] = {}
     for chunk in chunks(ids, 100):
         joined = ",".join(str(value) for value in chunk)
         private_rows = supabase_get(
@@ -184,17 +185,92 @@ def load_interview_set(
             token,
             "interview_private_content",
             {
-                "select": "question_id,answer",
+                "select": "question_id,answer,answer_variants,audio_variants,audio_text_hash,duration_seconds",
                 "question_id": f"in.({joined})",
                 "order": "question_id.asc",
             },
         )
         for row in private_rows:
-            answers_by_id[int(row["question_id"])] = str(row.get("answer") or "")
+            answers_by_id[int(row["question_id"])] = row
 
     for row in questions:
-        row["answer"] = answers_by_id.get(int(row["id"]), "")
+        private = answers_by_id.get(int(row["id"]), {})
+        for field in ("answer", "answer_variants", "audio_variants", "audio_text_hash", "duration_seconds"):
+            row[field] = private.get(field)
     return interview_set, questions
+
+
+ANSWER_VARIANTS = ("full", "short", "standard")
+
+
+def validate_set_slug(slug: str) -> str:
+    if not isinstance(slug, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", slug):
+        raise CliError("Interview set slug must contain only letters, digits, hyphens or underscores.")
+    return slug
+
+
+def load_input_json(path: str, slug: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Read an explicitly supplied trusted export; this never supplies upload data."""
+    try:
+        data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise CliError(f"Could not read input export: {path}") from error
+    if not isinstance(data, dict) or not isinstance(data.get("interview_set"), dict) or not isinstance(data.get("rows"), list):
+        raise CliError("Input JSON must contain interview_set and rows.")
+    interview_set = data["interview_set"]
+    if interview_set.get("slug") != slug:
+        raise CliError("Input export's set slug does not match --set.")
+    rows = []
+    ids = set()
+    for value in data["rows"]:
+        if not isinstance(value, dict) or type(value.get("id")) is not int or value["id"] <= 0 or value["id"] in ids:
+            raise CliError("Input rows require unique positive integer question IDs.")
+        if not isinstance(value.get("question"), str) or not isinstance(value.get("answer", ""), str):
+            raise CliError("Input question and answer must be strings.")
+        if value.get("set_id") is not None and value["set_id"] != interview_set.get("id"):
+            raise CliError("Input question belongs to a different interview set.")
+        variants = value.get("answer_variants") or {}
+        if not isinstance(variants, dict) or any(key in variants and not isinstance(variants[key], str) for key in ANSWER_VARIANTS):
+            raise CliError("Input answer_variants must contain string values.")
+        ids.add(value["id"])
+        rows.append({**value, "sort_order": value.get("sort_order") or value["id"]})
+    return interview_set, rows
+
+
+def effective_answer(row: dict[str, Any], variant: str) -> str:
+    variants = row.get("answer_variants") or {}
+    value = variants.get(variant) if isinstance(variants, dict) else None
+    return value if isinstance(value, str) and value else str(row.get("answer") or "")
+
+
+def source_hash(row: dict[str, Any], variant: str = "full") -> str:
+    return hashlib.sha256((str(row.get("question") or "") + "\n" + effective_answer(row, variant)).encode("utf-8")).hexdigest()
+
+
+def selected_answer_variant(args: argparse.Namespace) -> str:
+    variant = getattr(args, "answer_variant", None) or ("all" if args.mode == "combined" else "full")
+    if args.mode != "combined" and variant != "full":
+        raise CliError("--answer-variant short/standard/all requires --mode combined.")
+    return variant
+
+
+def audio_targets(row: dict[str, Any], mode: str, variant: str) -> list[dict[str, Any]]:
+    """Deduplicate by exact effective source, while preserving all variant aliases."""
+    grouped: dict[str, dict[str, Any]] = {}
+    for name in ANSWER_VARIANTS if variant == "all" else (variant,):
+        digest = source_hash(row, name)
+        if digest in grouped:
+            grouped[digest]["answer_variants"].append(name)
+            continue
+        effective = {**row, "answer": effective_answer(row, name)}
+        grouped[digest] = {"source_hash": digest, "answer_variants": [name], "files": target_texts(effective, mode)}
+    targets = []
+    for group in grouped.values():
+        for filename, text in group["files"]:
+            if mode == "combined":
+                filename = f"q{int(row['id'])}-{group['source_hash']}{Path(filename).suffix}"
+            targets.append({"filename": filename, "text": text, "source_hash": group["source_hash"], "answer_variants": group["answer_variants"]})
+    return targets
 
 
 def chunks(values: list[int], size: int) -> Iterable[list[int]]:
@@ -310,7 +386,9 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 
 def save_manifest(path: Path, manifest: dict[str, Any]) -> None:
-    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def audio_duration_seconds(path: Path) -> float:
@@ -360,6 +438,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--set", dest="set_slug", help="Interview set slug to generate.")
     parser.add_argument("--style-id", type=int, help="AivisSpeech style ID. Use --list-voices to find it.")
     parser.add_argument("--mode", choices=["combined", "split", "question", "answer"], default="combined")
+    parser.add_argument("--answer-variant", choices=[*ANSWER_VARIANTS, "all"], help="Combined answer selection; defaults to all for combined, full for other modes.")
+    parser.add_argument("--input-json", help="Trusted exported {interview_set, rows} JSON for local generation without login; cannot upload.")
     parser.add_argument("--question-id", type=int, action="append", help="Generate only this DB question ID; may be repeated.")
     parser.add_argument("--sort-order", type=int, action="append", help="Generate only this question number within the set; may be repeated.")
     parser.add_argument("--limit", type=int, help="Generate only the first N selected questions.")
@@ -385,7 +465,9 @@ def main() -> int:
         print_speakers(args.engine_url)
         return 0
 
-    token = get_supabase_token(args.supabase_url, args.supabase_key, args.access_token)
+    if args.input_json and args.list_sets:
+        raise CliError("--input-json cannot be combined with --list-sets.")
+    token = None if args.input_json else get_supabase_token(args.supabase_url, args.supabase_key, args.access_token)
 
     if args.list_sets:
         sets = list_interview_sets(args.supabase_url, args.supabase_key, token)
@@ -398,6 +480,8 @@ def main() -> int:
         parser.error("--set is required unless --list-voices or --list-sets is used.")
     if args.style_id is None:
         parser.error("--style-id is required for audio generation. Use --list-voices first.")
+    validate_set_slug(args.set_slug)
+    variant = selected_answer_variant(args)
 
     # Fail early with a useful error when AivisSpeech is not running or the style is invalid.
     speakers = get_speakers(args.engine_url)
@@ -410,18 +494,15 @@ def main() -> int:
     if valid_style_ids and args.style_id not in valid_style_ids:
         raise CliError(f"style-id {args.style_id} was not found. Run with --list-voices.")
 
-    interview_set, all_questions = load_interview_set(
-        args.supabase_url,
-        args.supabase_key,
-        token,
-        args.set_slug,
-    )
+    interview_set, all_questions = load_input_json(args.input_json, args.set_slug) if args.input_json else load_interview_set(
+        args.supabase_url, args.supabase_key, token, args.set_slug)
     questions = select_questions(all_questions, args)
     if not questions:
         raise CliError("No questions matched the requested filters.")
 
     set_dir = Path(args.output_dir).expanduser().resolve() / args.set_slug
-    set_dir.mkdir(parents=True, exist_ok=True)
+    if not args.dry_run:
+        set_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = set_dir / "manifest.json"
     manifest = load_manifest(manifest_path)
     manifest.setdefault("files", {})
@@ -436,6 +517,7 @@ def main() -> int:
             "engine_url": args.engine_url,
             "style_id": args.style_id,
             "mode": args.mode,
+            "answer_variant": variant,
             "speed_scale": args.speed,
             "pitch_scale": args.pitch,
             "intonation_scale": args.intonation,
@@ -443,7 +525,7 @@ def main() -> int:
         }
     )
 
-    total_targets = sum(len(target_texts(row, args.mode)) for row in questions)
+    total_targets = sum(len(audio_targets(row, args.mode, variant)) for row in questions)
     print(f"Set: {interview_set.get('company')} | {interview_set.get('position')}")
     print(f"Questions: {len(questions)} / Audio targets: {total_targets}")
     print(f"Output: {set_dir}")
@@ -451,7 +533,8 @@ def main() -> int:
     generated = 0
     skipped = 0
     for row in questions:
-        for filename, text in target_texts(row, args.mode):
+        for target in audio_targets(row, args.mode, variant):
+            filename, text = target["filename"], target["text"]
             output_path = set_dir / filename
             digest = generation_hash(
                 text,
@@ -462,13 +545,26 @@ def main() -> int:
                 volume_scale=args.volume,
             )
             previous = manifest["files"].get(filename) or {}
-            unchanged = output_path.exists() and previous.get("generation_hash") == digest
+            reuse_path = output_path
+            # Existing full recordings can seed the versioned library, but only
+            # when both their exact source and recorded byte digest still match.
+            if args.mode == "combined" and not output_path.exists():
+                legacy_name = f"q{int(row['id'])}{output_path.suffix}"
+                legacy = manifest["files"].get(legacy_name) or {}
+                if legacy.get("source_hash") == target["source_hash"]:
+                    previous = legacy.copy()
+                    reuse_path = set_dir / legacy_name
+            unchanged = (reuse_path.is_file() and previous.get("generation_hash") == digest
+                         and previous.get("source_hash") == target["source_hash"]
+                         and previous.get("audio_sha256") == hashlib.sha256(reuse_path.read_bytes()).hexdigest())
 
             if unchanged and not args.overwrite:
-                previous["source_hash"] = hashlib.sha256((row["question"] + "\n" + row["answer"]).encode("utf-8")).hexdigest()
-                previous["audio_sha256"] = hashlib.sha256(output_path.read_bytes()).hexdigest()
                 if not args.dry_run:
+                    if reuse_path != output_path:
+                        shutil.copyfile(reuse_path, output_path)
                     previous["duration_seconds"] = audio_duration_seconds(output_path)
+                    previous["answer_variants"] = target["answer_variants"]
+                    manifest["files"][filename] = previous
                     save_manifest(manifest_path, manifest)
                 print(f"SKIP  {filename}")
                 skipped += 1
@@ -490,7 +586,8 @@ def main() -> int:
                     "question_id": int(row["id"]),
                     "sort_order": int(row["sort_order"]),
                     "generation_hash": digest,
-                    "source_hash": hashlib.sha256((row["question"] + "\n" + row["answer"]).encode("utf-8")).hexdigest(),
+                    "source_hash": target["source_hash"],
+                    "answer_variants": target["answer_variants"],
                     "audio_sha256": hashlib.sha256(audio).hexdigest(),
                     "duration_seconds": audio_duration_seconds(output_path),
                     "generated_at": datetime.now(timezone.utc).isoformat(),
