@@ -23,7 +23,14 @@ test('audio controls keep duration, pause position, seeking and section colors',
   await expect(progress).toHaveText(`00:${String(Math.floor(pausedAt)).padStart(2, '0')} / 00:20`);
 
   // Exercise the native range hit area over the independently painted visuals.
-  await slider.scrollIntoViewIfNeeded();
+  // Native scrollIntoViewIfNeeded can leave the input behind the fixed header.
+  // Center it without smooth scrolling before using raw viewport coordinates.
+  await slider.evaluate(input => input.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
+  await expect.poll(() => slider.evaluate(input => {
+    const box = input.getBoundingClientRect();
+    const y = box.y + box.height / 2;
+    return [0.1, 0.6].every(fraction => document.elementFromPoint(box.x + box.width * fraction, y) === input);
+  }), { message: 'Both drag points must hit the audio slider, not the fixed header' }).toBe(true);
   const box = await slider.boundingBox();
   await page.mouse.move(box.x + box.width * 0.1, box.y + box.height / 2);
   await page.mouse.down();
