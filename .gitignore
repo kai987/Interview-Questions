@@ -10,6 +10,7 @@ local-audio/
 __pycache__/
 *.pyc
 .venv/
+.DS_Store
 
 # Browser test dependencies
 node_modules/

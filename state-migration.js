@@ -19,3 +19,29 @@ export function queueLocalStateMigration({ questionIds, remoteRows, local, sync 
     if (Object.keys(patch).length) sync.save(id, patch, { defer: true, migration: true });
   }
 }
+
+// Refresh one library without erasing legacy drafts in libraries not opened yet.
+export function mergeScopedLocalState({ questionIds, rows, local }) {
+  const next = {
+    favorite: new Set(local.favorite), practiced: new Set(local.practiced),
+    mastery: { ...local.mastery }, ownAnswers: { ...local.ownAnswers },
+    reviewHistory: { ...local.reviewHistory }
+  };
+  for (const id of questionIds) {
+    next.favorite.delete(id);
+    next.practiced.delete(id);
+    delete next.mastery[id];
+    delete next.ownAnswers[id];
+    delete next.reviewHistory[id];
+  }
+  for (const row of rows) {
+    const id = Number(row.question_id);
+    if (!questionIds.has(id)) continue;
+    if (row.favorite) next.favorite.add(id);
+    if (row.practiced) next.practiced.add(id);
+    if (row.mastery) next.mastery[id] = row.mastery;
+    if (row.own_answer) next.ownAnswers[id] = row.own_answer;
+    if (row.last_practiced_at) next.reviewHistory[id] = row.last_practiced_at;
+  }
+  return next;
+}

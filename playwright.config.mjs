@@ -22,7 +22,10 @@ export default defineConfig({
   },
   projects: [
     { name: 'desktop', use: { viewport: { width: 1440, height: 1000 } } },
-    { name: 'mobile', use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } }
+    { name: 'mobile', use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } },
+    // Keep the full Chromium matrix; other engines run only the key native-control flows.
+    { name: 'firefox', testMatch: '**/cross-browser.spec.mjs', use: { browserName: 'firefox', viewport: { width: 1440, height: 1000 } } },
+    { name: 'webkit', testMatch: '**/cross-browser.spec.mjs', use: { browserName: 'webkit', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } }
   ],
   webServer: {
     command: `python3 scripts/serve_local.py --port ${port}`,

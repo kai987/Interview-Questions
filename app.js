@@ -35,16 +35,25 @@
   const revealedIds = new Set();
 
   function loadIdSet(key) {
+    let result = new Set();
     try {
       const parsed = JSON.parse(localStorage.getItem(key) || '[]');
-      return new Set(Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : []);
-    } catch {
-      return new Set();
+      result = new Set(Array.isArray(parsed) ? parsed.map(Number).filter(id => data.some(item => item.id === id)) : []);
+    } catch {}
+    const field = key === 'interview-favorites' ? 'favorite' : 'practiced';
+    for (const item of data) {
+      const state = window.InterviewPrivateStore?.getState?.(item.id);
+      if (state) state[field] ? result.add(item.id) : result.delete(item.id);
     }
+    return result;
   }
 
   function saveIdSet(key, set) {
-    localStorage.setItem(key, JSON.stringify([...set]));
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || '[]');
+      const outside = Array.isArray(stored) ? stored.map(Number).filter(id => !data.some(item => item.id === id)) : [];
+      localStorage.setItem(key, JSON.stringify([...new Set([...outside, ...set])]));
+    } catch { /* The current action is still sent through the durable sync queue. */ }
   }
 
   function escapeHtml(str) {
@@ -303,6 +312,7 @@
       favoriteIds.has(id) ? favoriteIds.delete(id) : favoriteIds.add(id);
       saveIdSet('interview-favorites', favoriteIds);
       const favorite = favoriteIds.has(id);
+      window.InterviewPrivateStore?.saveState(id, { favorite });
       // Keep the card and its controls mounted to preserve scroll and playback state.
       favoriteButton.closest('.qa-card').classList.toggle('is-favorite', favorite);
       favoriteButton.classList.toggle('is-active', favorite);
@@ -319,6 +329,7 @@
       const id = Number(practicedButton.dataset.practicedId);
       practicedIds.has(id) ? practicedIds.delete(id) : practicedIds.add(id);
       saveIdSet('interview-practiced', practicedIds);
+      window.InterviewPrivateStore?.saveState(id, { practiced: practicedIds.has(id) });
       updatePracticedCard(id);
       updateStudyStats();
       showToast(practicedIds.has(id) ? '練習済みにしました' : '未練習に戻しました');

@@ -34,34 +34,69 @@
   let sessionRatings = {};
   let sessionDone = false;
   const history = loadObject('interview-review-history');
+  const sessionStore = window.InterviewPracticeSessions.create({
+    storage: localStorage,
+    ownerId: window.InterviewPrivateStore?.getOwnerId?.(),
+    setId: window.InterviewLibrary?.activeSet?.id,
+    questionIds: data.filter(item => item.category !== '逆質問').map(item => Number(item.id))
+  });
+  let savedSession = sessionStore.load();
+  let sessionSaveFailed = false;
   const sessionPanel = document.createElement('section');
   sessionPanel.className = 'practice-session';
   sessionPanel.hidden = true;
   sessionPanel.setAttribute('aria-label', '模擬面接の進行');
   questionSections.before(sessionPanel);
+  const resumePanel = document.createElement('section');
+  resumePanel.className = 'practice-session practice-resume';
+  resumePanel.setAttribute('aria-label', '中断した模擬面接');
+  sessionPanel.before(resumePanel);
   let observerQueued = false;
   let toastTimer = null;
 
   function loadObject(key) {
+    let result = {};
     try {
       const value = JSON.parse(localStorage.getItem(key) || '{}');
-      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-    } catch {
-      return {};
+      if (value && typeof value === 'object' && !Array.isArray(value)) result = value;
+    } catch {}
+    const field = { 'interview-mastery': 'mastery', 'interview-own-answers': 'own_answer', 'interview-review-history': 'last_practiced_at' }[key];
+    if (field) {
+      for (const item of data) {
+        const state = window.InterviewPrivateStore?.getState?.(item.id);
+        if (!state) continue;
+        if (state[field]) result[item.id] = state[field];
+        else delete result[item.id];
+      }
     }
+    return result;
   }
 
   function saveObject(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || '{}');
+      const next = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+      for (const { id } of data) {
+        if (Object.hasOwn(value, id)) next[id] = value[id];
+        else delete next[id];
+      }
+      localStorage.setItem(key, JSON.stringify(next));
+      return true;
+    } catch { return false; }
   }
 
   function loadIdSet(key) {
+    let result = new Set();
     try {
       const value = JSON.parse(localStorage.getItem(key) || '[]');
-      return new Set(Array.isArray(value) ? value.map(Number).filter(Number.isFinite) : []);
-    } catch {
-      return new Set();
+      result = new Set(Array.isArray(value) ? value.map(Number).filter(id => data.some(item => Number(item.id) === id)) : []);
+    } catch {}
+    const field = key === 'interview-favorites' ? 'favorite' : 'practiced';
+    for (const item of data) {
+      const state = window.InterviewPrivateStore?.getState?.(item.id);
+      if (state) state[field] ? result.add(Number(item.id)) : result.delete(Number(item.id));
     }
+    return result;
   }
 
   function escapeHtml(value) {
@@ -264,6 +299,8 @@
       window.dispatchEvent(new CustomEvent('interview-session-rated', { detail: { id } }));
       window.InterviewPrivateStore?.saveState(id, { mastery: level, practiced: true, last_practiced_at: history[id] });
       renderSessionPanel();
+    } else {
+      window.InterviewPrivateStore?.saveState(id, { mastery: mastery[id] || null });
     }
     saveObject(MASTERY_KEY, mastery);
     const card = document.getElementById(`q-${id}`);
@@ -273,12 +310,14 @@
   function saveOwnAnswer(id, value) {
     if (value.trim()) ownAnswers[id] = value;
     else delete ownAnswers[id];
-    saveObject(OWN_ANSWERS_KEY, ownAnswers);
+    const cached = saveObject(OWN_ANSWERS_KEY, ownAnswers);
     const editor = document.querySelector(`[data-own-answer-id="${id}"]`)?.closest('.own-answer-editor');
     const status = editor?.querySelector('.own-answer-status');
     const count = editor?.querySelector(`[data-own-answer-count="${id}"]`);
-    if (status) status.textContent = value.trim() ? '端末保存済み' : '未入力';
+    if (status) status.textContent = cached ? (value.trim() ? '端末保存済み' : '未入力') : '端末への保存に失敗しました。入力をコピーして保管してください。';
     if (count) count.textContent = `${value.length} 文字`;
+    // The current input is authoritative even if writing the UI cache failed.
+    window.InterviewPrivateStore?.saveState(id, { own_answer: value.trim() ? value : '' }, { debounce: true });
   }
 
   function shuffledSample(values, count) {
@@ -318,6 +357,36 @@
     }
   }
 
+  function renderResumePanel() {
+    resumePanel.hidden = !savedSession || Boolean(randomIds);
+    if (resumePanel.hidden) return;
+    const ready = Boolean(window.InterviewPrivateStore?.isReady?.());
+    resumePanel.innerHTML = `<h3>中断した模擬面接があります</h3>
+      <p>${savedSession.ids.length}問中 ${savedSession.index + 1}問目から再開できます。${ready ? 'タイマーと音声は停止した状態で再開します。' : '学習状態を再読み込みしてから再開してください。'}</p>
+      <button type="button" class="training-action training-action--primary" data-resume-action="resume" ${ready ? '' : 'disabled'}>前回の続きから</button>
+      <button type="button" class="training-action" data-resume-action="discard">この練習を終了</button>`;
+  }
+
+  function clearSavedSession() {
+    savedSession = null;
+    if (!sessionStore.clear()) showToast('練習の進行記録を端末から削除できませんでした');
+    renderResumePanel();
+  }
+
+  function persistSession() {
+    if (!randomIds || sessionDone) return;
+    savedSession = { ids: [...sessionIds], index: sessionIndex, ratings: { ...sessionRatings } };
+    const saved = sessionStore.save(savedSession);
+    if (!saved && !sessionSaveFailed) showToast('練習の進行を端末に保存できません。ページを閉じると再開できません。');
+    sessionSaveFailed = !saved;
+  }
+
+  resumePanel.addEventListener('click', event => {
+    const action = event.target.closest('[data-resume-action]')?.dataset.resumeAction;
+    if (action === 'resume' && savedSession) beginSession(savedSession.ids, savedSession);
+    if (action === 'discard') clearSavedSession();
+  });
+
   function renderSessionPanel() {
     sessionPanel.hidden = !randomIds;
     if (!randomIds) return;
@@ -356,12 +425,13 @@
     window.dispatchEvent(new Event('interview-session-step'));
   }
 
-  function beginSession(ids) {
+  function beginSession(ids, restored = null) {
+    if (!window.InterviewPrivateStore?.isReady?.()) return;
     stopActiveTimer();
     window.InterviewAudioPlayer?.stop();
     sessionIds = ids;
-    sessionIndex = 0;
-    sessionRatings = {};
+    sessionIndex = restored?.index ?? 0;
+    sessionRatings = { ...(restored?.ratings || {}) };
     sessionDone = false;
     randomIds = new Set(ids);
     searchInput.value = '';
@@ -369,6 +439,8 @@
     window.dispatchEvent(new Event('interview-session-start'));
     if (practiceModeButton?.getAttribute('aria-pressed') !== 'true') practiceModeButton?.click();
     updateRandomUI();
+    persistSession();
+    renderResumePanel();
     renderSessionPanel();
     enhanceCards();
     sessionPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -385,18 +457,23 @@
     window.InterviewAudioPlayer?.stop();
     sessionIndex += 1;
     sessionDone = sessionIndex >= sessionIds.length;
+    if (sessionDone) clearSavedSession();
+    else persistSession();
     renderSessionPanel();
     applyRandomFilter();
     sessionPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     sessionPanel.querySelector('h3')?.focus({ preventScroll: true });
   });
 
-  function clearRandomPractice({ rerender = true } = {}) {
+  function clearRandomPractice({ rerender = true, discard = true } = {}) {
+    if (!discard) persistSession();
     randomIds = null;
+    if (discard) clearSavedSession();
     stopActiveTimer();
     window.InterviewAudioPlayer?.stop();
     sessionPanel.hidden = true;
     updateRandomUI();
+    renderResumePanel();
     document.querySelectorAll('.qa-card, .category-section').forEach(element => { element.hidden = false; });
     if (rerender && searchInput) {
       searchInput.value = '';
@@ -414,7 +491,7 @@
     beginSession(shuffledSample(candidates, 10));
   }
 
-  document.getElementById('normalModeButton')?.addEventListener('click', () => { if (randomIds) clearRandomPractice(); });
+  document.getElementById('normalModeButton')?.addEventListener('click', () => { if (randomIds) clearRandomPractice({ discard: false }); });
 
   timerSecondsButtons.forEach(button => {
     button.addEventListener('click', () => setTimerSeconds(button.dataset.timerSeconds));
@@ -427,11 +504,11 @@
   });
 
   searchInput?.addEventListener('input', () => {
-    if (randomIds instanceof Set && searchInput.value.trim()) clearRandomPractice({ rerender: false });
+    if (randomIds instanceof Set && searchInput.value.trim()) clearRandomPractice({ rerender: false, discard: false });
   }, { capture: true });
 
   categoryNav?.addEventListener('click', () => {
-    if (randomIds instanceof Set) clearRandomPractice({ rerender: false });
+    if (randomIds instanceof Set) clearRandomPractice({ rerender: false, discard: false });
   }, { capture: true });
 
   questionSections.addEventListener('click', event => {
@@ -466,7 +543,9 @@
 
   setTimerSeconds(selectedTimerSeconds);
   updateRandomUI();
+  renderResumePanel();
   enhanceCards();
+  window.addEventListener('interview-session-rated', persistSession);
   document.addEventListener('visibilitychange', tickTimer);
   window.addEventListener('beforeunload', () => stopActiveTimer(false));
 })();

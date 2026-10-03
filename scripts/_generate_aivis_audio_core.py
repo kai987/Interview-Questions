@@ -185,7 +185,7 @@ def load_interview_set(
             token,
             "interview_private_content",
             {
-                "select": "question_id,answer,answer_variants,audio_variants,audio_text_hash,duration_seconds",
+                "select": "question_id,answer,answer_variants,audio_variants,audio_text_hash,duration_seconds,updated_at",
                 "question_id": f"in.({joined})",
                 "order": "question_id.asc",
             },
@@ -195,7 +195,7 @@ def load_interview_set(
 
     for row in questions:
         private = answers_by_id.get(int(row["id"]), {})
-        for field in ("answer", "answer_variants", "audio_variants", "audio_text_hash", "duration_seconds"):
+        for field in ("answer", "answer_variants", "audio_variants", "audio_text_hash", "duration_seconds", "updated_at"):
             row[field] = private.get(field)
     return interview_set, questions
 

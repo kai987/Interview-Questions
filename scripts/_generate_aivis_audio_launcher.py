@@ -312,10 +312,14 @@ def upload_mp3(
     bucket: str,
     object_path: str,
     file_path: Path,
+    expected_sha256: str | None = None,
 ) -> None:
     encoded_path = "/".join(quote(part, safe="") for part in object_path.split("/"))
     url = f"{supabase_url.rstrip('/')}/storage/v1/object/{quote(bucket, safe='')}/{encoded_path}"
     data = file_path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    if expected_sha256 and digest != expected_sha256:
+        raise core.CliError(f"Audio changed before upload: {file_path.name}. Generate it again before uploading.")
     request = core.Request(
         url,
         data=data,
@@ -325,17 +329,69 @@ def upload_mp3(
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "audio/mpeg",
             "cache-control": "3600",
-            "x-upsert": "true",
+            "x-upsert": "false",
         },
     )
     try:
         with core.urlopen(request, timeout=180.0) as response:
             response.read()
     except core.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        raise core.CliError(f"Storage upload failed for {file_path.name}: HTTP {error.code}\n{detail}") from error
+        # A retry can find an object uploaded by a previous interrupted run.
+        # Never overwrite it: accept it only after verifying the complete bytes.
+        if error.code not in (400, 409):
+            raise core.CliError(f"Storage upload failed for {file_path.name}: HTTP {error.code}") from error
     except core.URLError as error:
         raise core.CliError(f"Storage upload failed for {file_path.name}: {error.reason}") from error
+    downloaded = core.http_request(
+        f"{supabase_url.rstrip('/')}/storage/v1/object/authenticated/{quote(bucket, safe='')}/{encoded_path}",
+        headers={"apikey": supabase_key, "Authorization": f"Bearer {access_token}", "Cache-Control": "no-cache"},
+        timeout=180.0, expect_json=False,
+    )
+    if not isinstance(downloaded, bytes) or len(downloaded) != len(data) or hashlib.sha256(downloaded).hexdigest() != digest:
+        raise core.CliError(f"Uploaded audio verification failed: {file_path.name}. No metadata was registered.")
+
+
+def register_audio_variants(args: argparse.Namespace, access_token: str, user_id: str,
+                            registrations: dict[int, dict[str, Any]]) -> None:
+    """Compare-and-swap each row, merging only our variants into its latest state.
+
+    Requires the database's BEFORE UPDATE trigger to advance updated_at for every
+    writer. Immutable objects remain safe to reuse after a conflict or partial run.
+    Every attempt rechecks source text; an edited answer is never silently accepted.
+    """
+    _, latest_rows = core.load_interview_set(args.supabase_url, args.supabase_key, access_token, args.set_slug)
+    latest = {int(row["id"]): row for row in latest_rows}
+    # Check all rows before beginning registration, so known stale input fails early.
+    for qid, by_variant in registrations.items():
+        row = latest.get(qid)
+        if not row or any(core.source_hash(row, name) != value["audio_text_hash"] for name, value in by_variant.items()):
+            raise core.CliError(f"Question {qid} changed during upload; audio metadata was not registered. Generate current audio again.")
+    for qid, by_variant in registrations.items():
+        for attempt in range(3):
+            row = latest.get(qid)
+            if not row or any(core.source_hash(row, name) != value["audio_text_hash"] for name, value in by_variant.items()):
+                raise core.CliError(f"Question {qid} changed during upload; audio metadata was not registered. Generate current audio again.")
+            if not isinstance(row.get("updated_at"), str) or not row["updated_at"]:
+                raise core.CliError(f"Question {qid} has no update version; safe audio registration is unavailable.")
+            existing = row.get("audio_variants")
+            merged = {**(existing if isinstance(existing, dict) else {}), **by_variant}
+            payload = {"audio_variants": merged}
+            if "full" in by_variant:
+                payload.update({"audio_text_hash": by_variant["full"]["audio_text_hash"], "duration_seconds": by_variant["full"]["duration_seconds"]})
+            saved = core.http_request(
+                core.api_url(args.supabase_url, '/rest/v1/interview_private_content', {
+                    'user_id': f'eq.{user_id}', 'question_id': f"eq.{qid}", 'updated_at': f"eq.{row['updated_at']}"}),
+                method='PATCH', headers={'apikey': args.supabase_key, 'Authorization': f'Bearer {access_token}', 'Prefer': 'return=representation'},
+                json_body=payload,
+            )
+            if isinstance(saved, list) and len(saved) == 1 and saved[0].get("question_id") == qid:
+                break
+            if saved != []:
+                raise core.CliError(f"Audio files uploaded, but metadata registration for question {qid} was not confirmed.")
+            if attempt == 2:
+                raise core.CliError(f"Audio files uploaded, but metadata registration for question {qid} was not confirmed after concurrent changes. Retry --upload-only.")
+            _, latest_rows = core.load_interview_set(args.supabase_url, args.supabase_key, access_token, args.set_slug)
+            latest = {int(value["id"]): value for value in latest_rows}
 
 
 def filename_matches_mode(filename: str, mode: str) -> bool:
@@ -417,7 +473,10 @@ def upload_local_audio(
     registrations: dict[int, dict[str, Any]] = {}
     for row, target, filename, versioned, metadata in entries:
         file_path = set_dir / filename
-        object_path = f"{user_id}/{args.set_slug}/{versioned}"
+        # Text identity and byte identity are separate: changing a voice must not
+        # replace an object still referenced by the live page.
+        remote_name = f"{Path(versioned).stem}-{metadata['audio_sha256']}.mp3"
+        object_path = f"{user_id}/{args.set_slug}/{remote_name}"
         print(f"UPLOAD {filename} -> {object_path}")
         upload_mp3(
             supabase_url=args.supabase_url,
@@ -426,39 +485,21 @@ def upload_local_audio(
             bucket=bucket,
             object_path=object_path,
             file_path=file_path,
+            expected_sha256=metadata["audio_sha256"],
         )
         if args.mode == "combined" and bucket == DEFAULT_STORAGE_BUCKET:
             by_variant = registrations.setdefault(int(row["id"]), {})
-            # The object key is shared by every equal-text variant. A new voice
-            # or encoding replaces its bytes, so update every alias's byte hash.
+            # Equal-text variants share this immutable object. Move every alias
+            # together when a new voice or encoding changes its byte identity.
             for name in core.ANSWER_VARIANTS:
                 if core.source_hash(row, name) != target["source_hash"]:
                     continue
-                by_variant[name] = {"audio_text_hash": target["source_hash"], "audio_sha256": metadata["audio_sha256"], "duration_seconds": metadata["duration_seconds"]}
+                by_variant[name] = {"audio_text_hash": target["source_hash"], "audio_sha256": metadata["audio_sha256"],
+                                    "duration_seconds": metadata["duration_seconds"], "object_path": object_path}
         uploaded += 1
 
     if registrations:
-        # Re-read after the potentially long upload. Preserve metadata for other
-        # variants and refuse registration if the text changed in the meantime.
-        _, latest_rows = core.load_interview_set(args.supabase_url, args.supabase_key, access_token, args.set_slug)
-        latest = {int(row["id"]): row for row in latest_rows}
-        for qid, by_variant in registrations.items():
-            row = latest.get(qid)
-            if not row or any(core.source_hash(row, name) != metadata["audio_text_hash"] for name, metadata in by_variant.items()):
-                raise core.CliError(f"Question {qid} changed during upload; audio metadata was not registered. Generate current audio again.")
-        for qid, by_variant in registrations.items():
-            existing = latest[qid].get("audio_variants")
-            merged = {**(existing if isinstance(existing, dict) else {}), **by_variant}
-            payload = {"audio_variants": merged}
-            if "full" in by_variant:
-                payload.update({"audio_text_hash": by_variant["full"]["audio_text_hash"], "duration_seconds": by_variant["full"]["duration_seconds"]})
-            saved = core.http_request(
-                core.api_url(args.supabase_url, '/rest/v1/interview_private_content', {'user_id': f'eq.{user_id}', 'question_id': f"eq.{qid}"}),
-                method='PATCH', headers={'apikey': args.supabase_key, 'Authorization': f'Bearer {access_token}', 'Prefer': 'return=representation'},
-                json_body=payload,
-            )
-            if not isinstance(saved, list) or len(saved) != 1 or saved[0].get("question_id") != qid:
-                raise core.CliError(f"Audio files uploaded, but metadata registration for question {qid} was not confirmed.")
+        register_audio_variants(args, access_token, user_id, registrations)
 
     print(f"Upload complete. Uploaded: {uploaded}")
     return uploaded

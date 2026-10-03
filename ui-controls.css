@@ -1,0 +1,141 @@
+/* Shared segmented controls. The sliding thumb owns every selected surface. */
+:root {
+  --ios-segment-track: color-mix(in srgb, var(--surface-soft) 88%, #dfe5ee);
+  --ios-segment-thumb-top: rgba(255, 255, 255, 0.99);
+  --ios-segment-thumb-bottom: rgba(247, 249, 252, 0.96);
+  --ios-segment-thumb-border: rgba(120, 135, 158, 0.16);
+  --ios-segment-shadow: 0 1px 2px rgba(19, 32, 54, 0.10), 0 5px 14px rgba(19, 32, 54, 0.08);
+}
+html[data-theme="dark"] {
+  --ios-segment-track: color-mix(in srgb, var(--surface-soft) 92%, #10151d);
+  --ios-segment-thumb-top: rgba(56, 64, 78, 0.99);
+  --ios-segment-thumb-bottom: rgba(40, 47, 59, 0.98);
+  --ios-segment-thumb-border: rgba(255, 255, 255, 0.09);
+  --ios-segment-shadow: 0 1px 2px rgba(0, 0, 0, 0.34), 0 5px 16px rgba(0, 0, 0, 0.26);
+}
+
+.mode-switch,
+.reading-size-control,
+.memory-toggle-group,
+.timer-segment-control {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 4px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--ios-segment-track);
+}
+.mode-switch { gap: 0; border-radius: 12px; }
+
+.ios-segment-thumb {
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: 0;
+  display: block;
+  width: 0;
+  height: 0;
+  border: 1px solid var(--ios-segment-thumb-border);
+  border-radius: 9px;
+  background: linear-gradient(180deg, var(--ios-segment-thumb-top), var(--ios-segment-thumb-bottom));
+  box-shadow: var(--ios-segment-shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: left 330ms cubic-bezier(.32, .72, 0, 1), top 330ms cubic-bezier(.32, .72, 0, 1),
+    width 330ms cubic-bezier(.32, .72, 0, 1), height 330ms cubic-bezier(.32, .72, 0, 1),
+    opacity 150ms ease, background 220ms ease, box-shadow 220ms ease;
+  will-change: left, top, width, height;
+}
+.ios-segment-thumb.is-immediate { transition: none; }
+.ios-segment-ready > .ios-segment-thumb { opacity: 1; }
+
+.mode-button,
+.reading-size-button,
+.memory-toggle-button,
+.timer-segment-control .timer-setting-button {
+  position: relative;
+  z-index: 1;
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 750;
+  transition: color 220ms ease, opacity 220ms ease, transform 140ms ease;
+}
+.mode-button { min-height: 40px; padding: 0 14px; border-radius: 9px; font-size: 14px; }
+.reading-size-button { width: 38px; height: 36px; padding: 0; font-size: 15px; }
+.memory-toggle-button { min-width: 48px; padding: 0 10px; font-size: 13px; font-weight: 800; }
+.memory-toggle-button:hover { color: var(--text); }
+.timer-segment-control .timer-setting-button { min-width: 58px; padding: 0 12px; font-size: 14px; }
+.mode-button.is-active,
+.reading-size-button.is-active,
+.memory-toggle-button.is-active,
+.timer-segment-control .timer-setting-button.is-active { color: var(--accent-ink); }
+.mode-button:active,
+.reading-size-button:active,
+.memory-toggle-button:active,
+.timer-segment-control .timer-setting-button:active { transform: scale(.97); }
+
+/* Labels stay outside the segmented track. */
+.labeled-segment-control,
+.memory-setting-row,
+.control-field { display: inline-flex; align-items: center; min-width: 0; gap: 8px; }
+.segment-control-label,
+.memory-toggle-label,
+.control-field__label {
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.answer-length-control { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.answer-length-control button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
+.answer-length-control button[aria-pressed="true"] {
+  color: var(--training-purple);
+  background: var(--training-purple-soft);
+  border-color: var(--training-purple);
+}
+.answer-length-label { white-space: nowrap; }
+.answer-length-duration {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+  .mode-switch { width: 100%; }
+  .mode-button { flex: 1; }
+  .reading-size-control { justify-self: start; }
+  .memory-setting-row,
+  .labeled-segment-control,
+  .control-field { justify-content: space-between; }
+}
+@media (max-width: 520px) {
+  .memory-setting-row,
+  .control-field { width: 100%; }
+  .memory-toggle-group { flex: 1; width: 100%; }
+  .memory-toggle-button { flex: 1; }
+  .memory-toggle-label { min-width: 108px; }
+  .segment-control-label,
+  .memory-toggle-label,
+  .control-field__label { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ios-segment-thumb { transition: opacity 120ms ease; }
+}

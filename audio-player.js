@@ -4,6 +4,7 @@
   const SUPABASE_PROJECT_REF = 'flpmblfscgcbrprwwckz';
   const SESSION_STORAGE_KEY = `sb-${SUPABASE_PROJECT_REF}-auth-token`;
   const AUDIO_BUCKET = 'interview-audio';
+  const AUDIO_LOAD_TIMEOUT_MS = 15000;
 
   let speakingId = null;
   let activePlaybackKey = null;
@@ -15,9 +16,66 @@
   let activeUtterance = null;
   let playbackPaused = false;
   let audioPlayAttempt = 0;
+  let activeLoadController = null;
   const privateAudioCache = new Map();
   const audioPreviews = new Map();
   const recordingPreviews = new Map();
+
+  class AudioLoadError extends Error {
+    constructor(code) { super(code); this.code = code; }
+  }
+
+  function feedbackFor(button) {
+    const toolbar = button.closest('.qa-toolbar');
+    if (!toolbar) return null;
+    let feedback = toolbar.parentElement.querySelector('.audio-feedback');
+    if (!feedback) {
+      feedback = document.createElement('div');
+      feedback.className = 'audio-feedback';
+      feedback.setAttribute('role', 'status');
+      const message = document.createElement('span');
+      message.className = 'audio-feedback-message';
+      feedback.append(message);
+      for (const [className, label] of [['audio-retry-button', '録音を再試行'], ['audio-browser-button', 'ブラウザ音声で読む']]) {
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.className = `training-action ${className}`;
+        action.textContent = label;
+        feedback.append(action);
+      }
+      toolbar.after(feedback);
+    }
+    return feedback;
+  }
+
+  function showAudioFailure(button, error) {
+    stopPlayback();
+    const messages = {
+      timeout: '録音の読み込みが時間切れになりました。通信状態を確認して再試行してください。',
+      auth: '録音を読み込めません。ログイン状態を確認して再試行してください。',
+      missing: 'この回答の録音はまだ用意されていません。',
+      integrity: '録音を確認できませんでした。再試行してください。',
+      decode: '録音を再生できませんでした。再試行してください。',
+      network: '録音を読み込めませんでした。通信状態を確認して再試行してください。'
+    };
+    const feedback = feedbackFor(button);
+    if (!feedback) return;
+    feedback.querySelector('.audio-feedback-message').textContent = messages[error?.code] || messages.network;
+    feedback.querySelector('.audio-browser-button').hidden = !('speechSynthesis' in window);
+    feedback.hidden = false;
+    const card = button.closest('.qa-card');
+    if (card) delete card.dataset.audioPreviewLoaded;
+    refreshPreviews();
+  }
+
+  function discardSource(source) {
+    for (const [key, value] of audioPreviews) if (value.url === source.url) audioPreviews.delete(key);
+    for (const [key, url] of privateAudioCache) {
+      if (url !== source.url) continue;
+      URL.revokeObjectURL(url);
+      privateAudioCache.delete(key);
+    }
+  }
 
   function activeSetSlug() {
     return String(window.InterviewLibrary?.activeSet?.slug || '').trim();
@@ -75,6 +133,8 @@
   }
 
   function stopPlayback() {
+    activeLoadController?.abort();
+    activeLoadController = null;
     playbackRequest += 1;
     audioPlayAttempt += 1;
     playbackPaused = false;
@@ -93,6 +153,7 @@
     speakingId = null;
     activePlaybackKey = null;
     resetSpeechButtons();
+    document.querySelectorAll('.audio-feedback').forEach(feedback => { feedback.hidden = true; });
   }
 
   function pausePlayback(button) {
@@ -115,8 +176,7 @@
         await audio.play();
       } catch {
         if (activeAudio === audio && audioPlayAttempt === attempt) {
-          playbackPaused = true;
-          setButtonState(button, '再開', false);
+          showAudioFailure(button, new AudioLoadError('decode'));
         }
       }
     } else if (activeUtterance) {
@@ -153,13 +213,13 @@
     return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  function selectedAnswer(item) {
-    return window.InterviewAnswers?.text(item) ?? item.answer;
+  function selectedAnswer(item, variant = window.InterviewAnswers?.selected(item) || 'full') {
+    return item.answerVariants?.[variant] || item.answer || '';
   }
 
-  function previewKey(item) {
-    return JSON.stringify([activeSetSlug(), item.id, item.question, selectedAnswer(item),
-      window.InterviewAnswers?.selected(item) || 'full', item.audioVariants,
+  function previewKey(item, variant = window.InterviewAnswers?.selected(item) || 'full') {
+    return JSON.stringify([activeSetSlug(), item.id, item.question, selectedAnswer(item, variant),
+      variant, item.audioVariants,
       item.audioTextHash, item.audioDurationSeconds]);
   }
 
@@ -172,14 +232,15 @@
     const bytes = value.audio_sha256 || legacy?.[2] || null;
     if (bytes && (!/^[a-f0-9]{64}$/.test(bytes) || (legacy && bytes !== legacy[2]))) return null;
     const duration = Number(value.duration_seconds);
-    return { hash, bytes, legacy: Boolean(legacy), duration: Number.isFinite(duration) && duration > 0 ? duration : NaN };
+    const objectPath = value.object_path;
+    if (objectPath != null && (typeof objectPath !== 'string' || !bytes || legacy)) return null;
+    return { hash, bytes, objectPath, legacy: Boolean(legacy), duration: Number.isFinite(duration) && duration > 0 ? duration : NaN };
   }
 
-  function verifiedRecording(item) {
-    const key = previewKey(item);
+  function verifiedRecording(item, selected = window.InterviewAnswers?.selected(item) || 'full') {
+    const key = previewKey(item, selected);
     if (recordingPreviews.has(key)) return recordingPreviews.get(key);
-    const answer = selectedAnswer(item);
-    const selected = window.InterviewAnswers?.selected(item) || 'full';
+    const answer = selectedAnswer(item, selected);
     const variants = item.audioVariants || {};
     // Identical prose can share one recording, including standard === full.
     // Legacy flat fields remain a fallback for previously registered full audio.
@@ -199,7 +260,11 @@
     return recording.legacy ? `q${Number(item.id)}.mp3` : `q${Number(item.id)}-${recording.hash}.mp3`;
   }
 
-  async function resolveLocalAudio(item, recording) {
+  function checkCancelled(signal) {
+    if (signal.aborted) throw new AudioLoadError('cancelled');
+  }
+
+  async function resolveLocalAudio(item, recording, signal) {
     if (!isLocalDevelopment()) return null;
     const slug = activeSetSlug();
     if (!slug) return null;
@@ -210,30 +275,34 @@
     try {
       const cacheKey = 'local:' + url + ':' + recording.bytes;
       if (privateAudioCache.has(cacheKey)) return privateAudioCache.get(cacheKey);
-      const response = await fetch(url, { cache: 'no-store' });
+      const response = await fetch(url, { cache: 'no-store', signal });
       if (!response.ok) return null;
       const blob = await response.blob();
       if (await sha256(await blob.arrayBuffer()) !== recording.bytes) return null;
+      checkCancelled(signal);
       const objectUrl = URL.createObjectURL(blob);
       privateAudioCache.set(cacheKey, objectUrl);
       return objectUrl;
     } catch {
+      checkCancelled(signal);
       return null;
     }
   }
 
-  async function resolvePrivateStorageAudio(item, recording) {
+  async function resolvePrivateStorageAudio(item, recording, signal) {
     const session = readBrowserSession();
     const accessToken = String(session?.access_token || '').trim();
-    if (!accessToken) return null;
+    if (!accessToken) throw new AudioLoadError('auth');
 
     const slug = activeSetSlug();
-    if (!slug) return null;
+    if (!slug) throw new AudioLoadError('missing');
     const userId = String(session?.user?.id || jwtSubject(accessToken) || '').trim();
-    if (!userId) return null;
+    if (!userId) throw new AudioLoadError('auth');
 
     const filename = recordingFilename(item, recording);
-    const objectPath = `${userId}/${slug}/${filename}`;
+    const immutablePath = `${userId}/${slug}/q${Number(item.id)}-${recording.hash}-${recording.bytes}.mp3`;
+    if (recording.objectPath != null && recording.objectPath !== immutablePath) throw new AudioLoadError('integrity');
+    const objectPath = recording.objectPath || `${userId}/${slug}/${filename}`;
     const cacheKey = objectPath + ':' + (recording.bytes || recording.hash);
     if (privateAudioCache.has(cacheKey)) return privateAudioCache.get(cacheKey);
 
@@ -244,56 +313,53 @@
       const response = await fetch(url, {
         method: 'GET',
         cache: 'no-store',
+        signal,
         headers: {
           apikey: SUPABASE_PUBLISHABLE_KEY,
           Authorization: `Bearer ${accessToken}`
         }
       });
 
-      if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404) {
-        return null;
-      }
-      if (!response.ok) {
-        console.warn('Could not load private interview audio:', response.status, response.statusText);
-        return null;
-      }
+      if (response.status === 401 || response.status === 403) throw new AudioLoadError('auth');
+      if (response.status === 400 || response.status === 404) throw new AudioLoadError('missing');
+      if (!response.ok) throw new AudioLoadError('network');
 
       const blob = await response.blob();
-      if (!blob.size) return null;
-      if (recording.bytes && await sha256(await blob.arrayBuffer()) !== recording.bytes) return null;
+      if (!blob.size) throw new AudioLoadError('integrity');
+      if (recording.bytes && await sha256(await blob.arrayBuffer()) !== recording.bytes) throw new AudioLoadError('integrity');
+      checkCancelled(signal);
       const objectUrl = URL.createObjectURL(blob);
       privateAudioCache.set(cacheKey, objectUrl);
       return objectUrl;
     } catch (error) {
-      console.warn('Could not load private interview audio:', error);
-      return null;
+      checkCancelled(signal);
+      throw error instanceof AudioLoadError ? error : new AudioLoadError('network');
     }
   }
 
-  async function resolveAudioSource(item, recording) {
-    const local = await resolveLocalAudio(item, recording);
+  async function resolveAudioSource(item, recording, signal) {
+    checkCancelled(signal);
+    const local = await resolveLocalAudio(item, recording, signal);
     if (local) return { url: local, source: 'local' };
 
-    const storage = await resolvePrivateStorageAudio(item, recording);
+    const storage = await resolvePrivateStorageAudio(item, recording, signal);
     if (storage) return { url: storage, source: 'storage' };
 
     return null;
   }
 
-  function prepareAudio(item) {
+  async function prepareAudio(item, signal) {
     const key = previewKey(item);
     if (audioPreviews.has(key)) return audioPreviews.get(key);
-    const pending = (async () => {
-      const recording = await verifiedRecording(item);
-      if (!recording) return null;
-      const source = await resolveAudioSource(item, recording);
-      if (!source) return null;
-      return { ...source, duration: recording.duration };
-    })();
-    audioPreviews.set(key, pending);
-    // Allow a failed request to be retried when the user presses Play.
-    pending.then(source => { if (!source) audioPreviews.delete(key); });
-    return pending;
+    const recording = await verifiedRecording(item);
+    if (!recording) throw new AudioLoadError('missing');
+    const source = await resolveAudioSource(item, recording, signal);
+    if (!source) throw new AudioLoadError('missing');
+    checkCancelled(signal);
+    const result = { ...source, duration: recording.duration };
+    // Cache completed work only: cancelling an in-flight load must allow retry.
+    audioPreviews.set(key, result);
+    return result;
   }
 
   function refreshPreviews() {
@@ -375,18 +441,26 @@
     setButtonState(button, '読込中…');
 
     const request = playbackRequest;
-    const answer = window.InterviewAnswers?.text(item) ?? item.answer;
-    const spokenItem = { ...item, answer };
-    const source = await prepareAudio(item);
+    const controller = new AbortController();
+    activeLoadController = controller;
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, AUDIO_LOAD_TIMEOUT_MS);
+    let source;
+    try {
+      source = await prepareAudio(item, controller.signal);
+    } catch (error) {
+      if (speakingId === item.id && request === playbackRequest) {
+        showAudioFailure(button, timedOut ? new AudioLoadError('timeout') : error);
+      }
+      return;
+    } finally {
+      clearTimeout(timeout);
+      if (activeLoadController === controller) activeLoadController = null;
+    }
     if (speakingId !== item.id || request !== playbackRequest) return;
     const note = toolbar?.querySelector('.audio-source-note');
     showAudioProgress({ currentTime: initialTime, duration: source?.duration ?? NaN }, note);
     if (note) note.title = source ? '再生時間 / 音声の長さ' : 'ブラウザ音声は長さの事前取得・位置指定に対応していません';
-
-    if (!source) {
-      speakWithBrowser(spokenItem, button);
-      return;
-    }
 
     const audio = new Audio(source.url);
     activeAudio = audio;
@@ -415,13 +489,8 @@
     };
     audio.onerror = () => {
       if (activeAudio !== audio || speakingId !== item.id || request !== playbackRequest) return;
-      if (playbackPaused) { stopPlayback(); return; }
-      activeAudio = null;
-      activeProgressNote = null;
-      clearSeekControl();
-      showAudioProgress({ currentTime: 0, duration: NaN }, note);
-      if (note) note.title = 'ブラウザ音声は長さの事前取得・位置指定に対応していません';
-      speakWithBrowser(spokenItem, button);
+      discardSource(source);
+      showAudioFailure(button, new AudioLoadError('decode'));
     };
 
     const attempt = ++audioPlayAttempt;
@@ -430,18 +499,34 @@
       if (activeAudio === audio && speakingId === item.id && attempt === audioPlayAttempt) setButtonState(button, '停止');
     } catch {
       if (activeAudio !== audio || attempt !== audioPlayAttempt) return;
-      if (activeAudio === audio) activeAudio = null;
-      activeProgressNote = null;
-      clearSeekControl();
       if (speakingId === item.id && request === playbackRequest) {
-        showAudioProgress({ currentTime: 0, duration: NaN }, note);
-        if (note) note.title = 'ブラウザ音声は長さの事前取得・位置指定に対応していません';
-        speakWithBrowser(spokenItem, button);
+        discardSource(source);
+        showAudioFailure(button, new AudioLoadError('decode'));
       }
     }
   }
 
   document.addEventListener('click', event => {
+    const recovery = event.target.closest?.('.audio-retry-button, .audio-browser-button');
+    if (recovery) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const card = recovery.closest('.qa-card');
+      const button = card?.querySelector('[data-speech-id]');
+      const item = (window.INTERVIEW_DATA || []).find(entry => Number(entry.id) === Number(button?.dataset.speechId));
+      if (!item || !button) return;
+      if (recovery.classList.contains('audio-retry-button')) void play(item, button);
+      else {
+        stopPlayback();
+        speakingId = item.id;
+        activePlaybackKey = previewKey(item);
+        const note = card.querySelector('.audio-source-note');
+        showAudioProgress({ currentTime: 0, duration: NaN }, note);
+        if (note) note.title = 'ブラウザ音声は長さの事前取得・位置指定に対応していません';
+        speakWithBrowser({ ...item, answer: selectedAnswer(item) }, button);
+      }
+      return;
+    }
     const button = event.target.closest?.('[data-speech-id]');
     if (!button) return;
 
@@ -496,11 +581,17 @@
   window.InterviewAudioPlayer = {
     stop: stopPlayback,
     isLocalDevelopment,
+    async getDuration(item, variant) {
+      const recording = await verifiedRecording(item, variant);
+      return recording?.duration ?? NaN;
+    },
     clearCache() {
+      stopPlayback();
       audioPreviews.clear();
       recordingPreviews.clear();
       privateAudioCache.forEach(url => URL.revokeObjectURL(url));
       privateAudioCache.clear();
     }
   };
+  window.dispatchEvent(new Event('interview-audio-ready'));
 })();

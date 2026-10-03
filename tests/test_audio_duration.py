@@ -52,7 +52,7 @@ class AudioDurationTests(unittest.TestCase):
         set_dir.mkdir()
         mp3 = set_dir / "q1.mp3"
         subprocess.run([ffmpeg, "-v", "error", "-i", str(self.make_wav()), str(mp3)], check=True)
-        row = {"id": 1, "question": "Question", "answer": "Answer"}
+        row = {"id": 1, "question": "Question", "answer": "Answer", "updated_at": "2026-10-03T00:00:00+00:00"}
         digest = hashlib.sha256(b"Question\nAnswer").hexdigest()
         metadata = {"question_id": 1, "sort_order": 1, "source_hash": digest,
                     "audio_sha256": hashlib.sha256(mp3.read_bytes()).hexdigest(), "duration_seconds": 999}
@@ -69,7 +69,8 @@ class AudioDurationTests(unittest.TestCase):
         self.assertGreaterEqual(measured, 0.5)
         self.assertLess(measured, 1)
         upload.assert_called_once()
-        registered = {"audio_text_hash": digest, "audio_sha256": metadata["audio_sha256"], "duration_seconds": measured}
+        registered = {"audio_text_hash": digest, "audio_sha256": metadata["audio_sha256"], "duration_seconds": measured,
+                      "object_path": f"test-user/test-set/q1-{digest}-{metadata['audio_sha256']}.mp3"}
         self.assertEqual(request.call_args.kwargs["json_body"], {
             "audio_text_hash": digest, "duration_seconds": measured,
             "audio_variants": {name: registered for name in core.ANSWER_VARIANTS},

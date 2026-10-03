@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { queueLocalStateMigration } from '../state-migration.js';
+import { queueLocalStateMigration, mergeScopedLocalState } from '../state-migration.js';
 import { createStateSync } from '../sync-store.js';
 
 function memory() {
@@ -60,4 +60,23 @@ test('a pending favorite patch does not discard a legacy answer or review date',
   assert.equal(row.own_answer, 'legacy draft');
   assert.equal(row.last_practiced_at, '2026-09-20T01:00:00Z');
   sync.stop();
+});
+
+test('refreshing one library preserves every unmigrated field in another library', () => {
+  const before = local({
+    favorite: new Set([1, 2]), practiced: new Set([1, 2]),
+    mastery: { 1: 'learning', 2: 'confident' }, ownAnswers: { 1: 'old A', 2: 'legacy B' },
+    reviewHistory: { 1: 'old A date', 2: 'legacy B date' }
+  });
+  const next = mergeScopedLocalState({ questionIds: new Set([1]), rows: [{ question_id: 1, own_answer: 'cloud A' }], local: before });
+  assert.deepEqual([...next.favorite], [2]);
+  assert.deepEqual([...next.practiced], [2]);
+  assert.deepEqual(next.mastery, { 2: 'confident' });
+  assert.deepEqual(next.ownAnswers, { 1: 'cloud A', 2: 'legacy B' });
+  assert.deepEqual(next.reviewHistory, { 2: 'legacy B date' });
+  assert.equal(before.ownAnswers[1], 'old A');
+  const queued = [];
+  queueLocalStateMigration({ questionIds: new Set([2]), remoteRows: [], local: next,
+    sync: { pendingRows: () => [], save: (id, row) => queued.push({ id, ...row }) } });
+  assert.deepEqual(queued, [{ id: 2, favorite: true, practiced: true, mastery: 'confident', own_answer: 'legacy B', last_practiced_at: 'legacy B date' }]);
 });

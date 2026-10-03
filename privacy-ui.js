@@ -34,29 +34,6 @@
     });
   }
 
-  function currentLocalState(id) {
-    let favorites = [];
-    let practiced = [];
-    let mastery = {};
-    let ownAnswers = {};
-    try { favorites = JSON.parse(localStorage.getItem('interview-favorites') || '[]'); } catch {}
-    try { practiced = JSON.parse(localStorage.getItem('interview-practiced') || '[]'); } catch {}
-    try { mastery = JSON.parse(localStorage.getItem('interview-mastery') || '{}') || {}; } catch {}
-    try { ownAnswers = JSON.parse(localStorage.getItem('interview-own-answers') || '{}') || {}; } catch {}
-    return {
-      favorite: Array.isArray(favorites) && favorites.map(Number).includes(id),
-      practiced: Array.isArray(practiced) && practiced.map(Number).includes(id),
-      mastery: mastery[id] || null,
-      own_answer: ownAnswers[id] || ''
-    };
-  }
-
-  function syncStateSoon(id, field, options = {}) {
-    if (!window.InterviewPrivateStore?.isReady?.()) return;
-    const state = currentLocalState(id);
-    window.InterviewPrivateStore.saveState(id, { [field]: state[field] }, options);
-  }
-
   questionSections.addEventListener('click', event => {
     if (event.target.closest('[data-retry-library]')) {
       event.preventDefault();
@@ -68,18 +45,6 @@
       window.InterviewPrivateStore?.openLogin?.();
       return;
     }
-    const favorite = event.target.closest('[data-favorite-id]');
-    if (favorite) return syncStateSoon(Number(favorite.dataset.favoriteId), 'favorite');
-    const practiced = event.target.closest('[data-practiced-id]');
-    if (practiced) return syncStateSoon(Number(practiced.dataset.practicedId), 'practiced');
-    const mastery = event.target.closest('[data-mastery-id]');
-    if (mastery) return syncStateSoon(Number(mastery.dataset.masteryId), 'mastery');
-  });
-
-  questionSections.addEventListener('input', event => {
-    const textarea = event.target.closest('[data-own-answer-id]');
-    if (!textarea) return;
-    syncStateSoon(Number(textarea.dataset.ownAnswerId), 'own_answer', { debounce: true });
   });
 
   const syncBanner = document.createElement('div');

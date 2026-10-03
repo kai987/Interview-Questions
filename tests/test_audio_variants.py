@@ -7,6 +7,8 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlparse
 import wave
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -23,6 +25,7 @@ class AudioVariantTests(unittest.TestCase):
         self.set_dir.mkdir()
         self.manifest = self.set_dir / "manifest.json"
         self.row = {"id": 1, "sort_order": 1, "question": "Question", "answer": "Full answer",
+                    "updated_at": "2026-10-03T00:00:00+00:00",
                     "answer_variants": {"short": "Short answer", "standard": "Full answer"}}
         self.args = argparse.Namespace(set_slug="test-set", output_dir=str(self.root), mode="combined",
                                        answer_variant="all", question_id=None, sort_order=None, limit=None,
@@ -86,7 +89,8 @@ class AudioVariantTests(unittest.TestCase):
         self.args.answer_variant = "full"
         count, upload, _, _ = self.upload()
         self.assertEqual(count, 1)
-        self.assertEqual(upload.call_args.kwargs["object_path"], f"test-user/test-set/q1-{core.source_hash(self.row)}.mp3")
+        digest = hashlib.sha256((self.set_dir / "q1.mp3").read_bytes()).hexdigest()
+        self.assertEqual(upload.call_args.kwargs["object_path"], f"test-user/test-set/q1-{core.source_hash(self.row)}-{digest}.mp3")
 
     def test_upload_does_not_rewrite_a_manifest_with_already_measured_durations(self):
         filename = self.audio_file("full")
@@ -159,6 +163,86 @@ class AudioVariantTests(unittest.TestCase):
         ) as request, self.assertRaisesRegex(core.CliError, "changed during upload"):
             launcher.upload_local_audio(self.args, access_token="test-token", bucket=launcher.DEFAULT_STORAGE_BUCKET)
         request.assert_not_called()
+
+    def test_concurrent_variant_registration_reloads_and_preserves_the_other_upload(self):
+        self.audio_file("short")
+        self.args.answer_variant = "short"
+        other_audio = {"audio_text_hash": core.source_hash(self.row), "audio_sha256": "other-voice"}
+        concurrent = {**self.row, "updated_at": "2026-10-03T00:00:01+00:00", "audio_variants": {"full": other_audio}}
+        with patch.object(launcher, "jwt_subject", return_value="test-user"), patch.object(
+            core, "load_interview_set", side_effect=[({}, [self.row]), ({}, [self.row]), ({}, [concurrent])]
+        ), patch.object(launcher, "upload_mp3"), patch.object(core, "audio_duration_seconds", return_value=1.25), patch.object(
+            core, "http_request", side_effect=[[], [{"question_id": 1}]]
+        ) as request:
+            self.assertEqual(launcher.upload_local_audio(self.args, access_token="test-token", bucket=launcher.DEFAULT_STORAGE_BUCKET), 1)
+        first, second = request.call_args_list
+        self.assertEqual(parse_qs(urlparse(first.args[0]).query)["updated_at"], [f"eq.{self.row['updated_at']}"])
+        self.assertEqual(parse_qs(urlparse(second.args[0]).query)["updated_at"], [f"eq.{concurrent['updated_at']}"])
+        self.assertEqual(second.kwargs["json_body"]["audio_variants"]["full"], other_audio)
+        self.assertIn("short", second.kwargs["json_body"]["audio_variants"])
+
+    def test_text_change_after_final_read_is_rejected_after_cas_conflict(self):
+        self.audio_file("full")
+        self.args.answer_variant = "full"
+        changed = {**self.row, "answer": "Edited just before registration", "updated_at": "2026-10-03T00:00:01+00:00"}
+        with patch.object(launcher, "jwt_subject", return_value="test-user"), patch.object(
+            core, "load_interview_set", side_effect=[({}, [self.row]), ({}, [self.row]), ({}, [changed])]
+        ), patch.object(launcher, "upload_mp3"), patch.object(core, "audio_duration_seconds", return_value=1.25), patch.object(
+            core, "http_request", return_value=[]
+        ) as request, self.assertRaisesRegex(core.CliError, "changed during upload"):
+            launcher.upload_local_audio(self.args, access_token="test-token", bucket=launcher.DEFAULT_STORAGE_BUCKET)
+        self.assertEqual(request.call_count, 1)
+
+    def test_new_voice_uses_a_new_remote_object_for_identical_answer(self):
+        filename = self.audio_file("full")
+        self.args.answer_variant = "full"
+        _, first, _, _ = self.upload()
+        data = b"a different voice for the same answer"
+        (self.set_dir / filename).write_bytes(data)
+        manifest = core.load_manifest(self.manifest)
+        manifest["files"][filename]["audio_sha256"] = hashlib.sha256(data).hexdigest()
+        core.save_manifest(self.manifest, manifest)
+        _, second, request, _ = self.upload()
+        self.assertNotEqual(first.call_args.kwargs["object_path"], second.call_args.kwargs["object_path"])
+        self.assertEqual(request.call_args.kwargs["json_body"]["audio_variants"]["full"]["object_path"], second.call_args.kwargs["object_path"])
+
+    def test_interrupted_upload_does_not_register_any_unverified_objects(self):
+        self.audio_file("full")
+        self.audio_file("short")
+        with patch.object(launcher, "jwt_subject", return_value="test-user"), patch.object(
+            core, "load_interview_set", return_value=({}, [self.row])
+        ), patch.object(launcher, "upload_mp3", side_effect=[None, core.CliError("connection lost")]), patch.object(
+            core, "audio_duration_seconds", return_value=1.25
+        ), patch.object(core, "http_request") as request, self.assertRaisesRegex(core.CliError, "connection lost"):
+            launcher.upload_local_audio(self.args, access_token="test-token", bucket=launcher.DEFAULT_STORAGE_BUCKET)
+        request.assert_not_called()
+
+    def test_immutable_upload_verifies_bytes_and_can_resume_an_existing_object(self):
+        filename = self.audio_file("full")
+        path = self.set_dir / filename
+        data = path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        duplicate = HTTPError("https://example.test", 409, "Already exists", {}, io.BytesIO(b"duplicate"))
+        for failure in (None, duplicate):
+            with self.subTest(existing=bool(failure)), patch.object(core, "urlopen", side_effect=failure) as post, patch.object(
+                core, "http_request", return_value=data
+            ) as download:
+                launcher.upload_mp3(supabase_url="https://example.test", supabase_key="key", access_token="token",
+                                    bucket="interview-audio", object_path="test-user/test-set/immutable.mp3", file_path=path, expected_sha256=digest)
+            self.assertEqual(post.call_args.args[0].get_header("X-upsert"), "false")
+            self.assertIn("/object/authenticated/", download.call_args.args[0])
+            self.assertFalse(download.call_args.kwargs["expect_json"])
+
+    def test_immutable_upload_rejects_remote_mismatch_and_changed_local_bytes(self):
+        filename = self.audio_file("full")
+        path = self.set_dir / filename
+        args = dict(supabase_url="https://example.test", supabase_key="key", access_token="token",
+                    bucket="interview-audio", object_path="test-user/test-set/immutable.mp3", file_path=path)
+        with patch.object(core, "urlopen"), patch.object(core, "http_request", return_value=b"wrong bytes"), self.assertRaisesRegex(core.CliError, "verification failed"):
+            launcher.upload_mp3(**args)
+        with patch.object(core, "urlopen") as post, self.assertRaisesRegex(core.CliError, "changed before upload"):
+            launcher.upload_mp3(**args, expected_sha256="0" * 64)
+        post.assert_not_called()
 
     def write_export(self):
         path = self.root / "input.json"

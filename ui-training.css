@@ -49,8 +49,7 @@ html[data-theme="dark"] {
   font: inherit;
   font-size: 14px;
 }
-.training-action,
-.timer-setting-button {
+.training-action {
   min-height: 38px;
   padding: 0 12px;
   border: 1px solid var(--line);
@@ -61,8 +60,7 @@ html[data-theme="dark"] {
   font-size: 14px;
   font-weight: 750;
 }
-.training-action:hover,
-.timer-setting-button:hover {
+.training-action:hover {
   border-color: var(--line-strong);
   background: var(--surface-soft);
 }
@@ -70,11 +68,6 @@ html[data-theme="dark"] {
   border-color: color-mix(in srgb, var(--training-purple) 38%, var(--line));
   background: var(--training-purple-soft);
   color: var(--training-purple);
-}
-.timer-setting-button.is-active {
-  border-color: color-mix(in srgb, var(--training-cyan) 42%, var(--line));
-  background: var(--training-cyan-soft);
-  color: var(--training-cyan);
 }
 .random-session-label {
   color: var(--training-purple);
@@ -279,11 +272,25 @@ html[data-theme="dark"] {
 .sync-banner { position: fixed; z-index: 45; right: 16px; bottom: 84px; width: min(440px, calc(100% - 32px)); box-sizing: border-box; box-shadow: var(--panel-shadow); display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--surface); font-size: 14px; }
 .sync-banner[data-state="error"], .sync-banner[data-state="local-error"] { border-color: var(--training-orange); background: var(--training-orange-soft); }
 .own-answer-status { white-space: normal; }
-.answer-length-control { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
-.answer-length-control button { min-height: 44px; }
-.answer-length-control button[aria-pressed="true"] { color: var(--training-purple); background: var(--training-purple-soft); border-color: var(--training-purple); }
 .answer-duration-note, .audio-source-note { color: var(--muted); font-size: 13px; line-height: 1.6; }
 .audio-source-note { font-variant-numeric: tabular-nums; }
+.audio-feedback {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--training-orange) 45%, var(--line));
+  border-radius: 9px;
+  background: var(--training-orange-soft);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.audio-feedback[hidden] { display: none; }
+.audio-feedback-message { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.audio-feedback .training-action { min-height: 44px; font-size: 13px; }
 .qa-toolbar { flex-wrap: wrap; }
 /* Paint the visuals outside the native range so desktop system controls cannot recolor them. */
 .audio-seek-control { position: relative; display: inline-block; flex: 1 1 120px; width: 120px; max-width: 280px; min-width: 0; height: 32px; color: var(--section-accent); }

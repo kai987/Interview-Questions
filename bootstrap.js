@@ -2,7 +2,7 @@
 ---
 {% assign asset_version = site.github.build_revision | default: 'dev' %}
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4/+esm';
-import { queueLocalStateMigration } from './state-migration.js?v={{ asset_version }}';
+import { queueLocalStateMigration, mergeScopedLocalState } from './state-migration.js?v={{ asset_version }}';
 
 const SUPABASE_URL = 'https://flpmblfscgcbrprwwckz.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_l2Gja5i6yw4CLv54fJqvWg_01YKpu4Y';
@@ -19,7 +19,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
 });
 
 let session = null;
-let bootComplete = false;
 let interviewSets = [];
 let activeSet = null;
 const stateCache = new Map();
@@ -226,11 +225,10 @@ function readLocalState() {
 }
 
 function writeLocalState(rows) {
-  const favorites = [];
-  const practiced = [];
-  const mastery = {};
-  const ownAnswers = {};
-  const reviewHistory = {};
+  const local = mergeScopedLocalState({
+    questionIds: new Set((window.INTERVIEW_DATA || []).map(item => Number(item.id))),
+    rows: rows || [], local: readLocalState()
+  });
   stateCache.clear();
   (rows || []).forEach(row => {
     const id = Number(row.question_id);
@@ -242,17 +240,16 @@ function writeLocalState(rows) {
       own_answer: row.own_answer || '',
       last_practiced_at: row.last_practiced_at || null
     });
-    if (row.last_practiced_at) reviewHistory[id] = row.last_practiced_at;
-    if (row.favorite) favorites.push(id);
-    if (row.practiced) practiced.push(id);
-    if (row.mastery) mastery[id] = row.mastery;
-    if (row.own_answer) ownAnswers[id] = row.own_answer;
   });
-  localStorage.setItem('interview-favorites', JSON.stringify(favorites));
-  localStorage.setItem('interview-practiced', JSON.stringify(practiced));
-  localStorage.setItem('interview-mastery', JSON.stringify(mastery));
-  localStorage.setItem('interview-own-answers', JSON.stringify(ownAnswers));
-  localStorage.setItem('interview-review-history', JSON.stringify(reviewHistory));
+  const values = {
+    'interview-favorites': [...local.favorite], 'interview-practiced': [...local.practiced],
+    'interview-mastery': local.mastery, 'interview-own-answers': local.ownAnswers,
+    'interview-review-history': local.reviewHistory
+  };
+  for (const [key, value] of Object.entries(values)) {
+    // The cloud snapshot remains usable in memory when the optional UI cache is full.
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }
 }
 
 async function loadPrivateData() {
@@ -281,7 +278,9 @@ async function loadPrivateData() {
 }
 
 function clearPrivateLocalState() {
-  ['interview-favorites', 'interview-practiced', 'interview-mastery', 'interview-own-answers', 'interview-review-history'].forEach(key => localStorage.removeItem(key));
+  ['interview-favorites', 'interview-practiced', 'interview-mastery', 'interview-own-answers', 'interview-review-history'].forEach(key => {
+    try { localStorage.removeItem(key); } catch {}
+  });
 }
 
 function saveState(questionId, patch, options = {}) {
@@ -301,6 +300,9 @@ function saveState(questionId, patch, options = {}) {
 
 window.InterviewPrivateStore = {
   saveState,
+  getOwnerId: () => session?.user?.id || null,
+  getActiveSet: () => activeSet,
+  getState: id => privateDataReady ? { ...stateCache.get(Number(id)) } : null,
   getSyncStatus: id => stateSync?.getStatus(id) || 'local',
   retry: () => stateSync?.retry(),
   hasPending: () => stateSync?.hasPending() || false,
@@ -422,21 +424,24 @@ if (!loadFailure && session) {
 }
 
 supabase.auth.onAuthStateChange((event, nextSession) => {
-  const wasSignedIn = Boolean(session?.user?.id);
+  const previousOwner = session?.user?.id || null;
+  const nextOwner = nextSession?.user?.id || null;
   session = nextSession;
   updateAuthButton();
-  if (!bootComplete) return;
-
-  // Supabase may emit SIGNED_IN again for an already authenticated session
-  // when the browser tab becomes active. Do not reload for that repeated event.
-  if (event === 'SIGNED_OUT' && wasSignedIn) {
-    stateSync?.stop();
-    clearPrivateLocalState();
-    window.location.reload();
-  }
+  // Repeated sign-in and token refresh events must not interrupt a practice session.
+  if (previousOwner === nextOwner) return;
+  privateDataReady = false;
+  stateSync?.stop();
+  stateCache.clear();
+  if (previousOwner) clearPrivateLocalState();
+  // Keep account-scoped pending edits for the previous owner to retry on return.
+  // Scheduling outside the auth callback also handles a change during startup.
+  setTimeout(() => window.location.reload(), 0);
 });
 
 await import('./app.js?v={{ asset_version }}');
+const { createPracticeSessionStore } = await import('./practice-session-store.js?v={{ asset_version }}');
+window.InterviewPracticeSessions = { create: createPracticeSessionStore };
 await import('./training.js?v={{ asset_version }}');
 await import('./study-hints.js?v={{ asset_version }}');
 await import('./answer-variants.js?v={{ asset_version }}');
@@ -445,7 +450,6 @@ await import('./expand-practice-fix.js?v={{ asset_version }}');
 await import('./ios-segmented.js?v={{ asset_version }}');
 await import('./privacy-ui.js?v={{ asset_version }}');
 
-bootComplete = true;
 document.body.classList.toggle('private-mode-unlocked', Boolean(session));
 document.body.classList.toggle('guest-mode', !session);
 if (loadFailure === 'library') {

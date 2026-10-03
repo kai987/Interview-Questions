@@ -44,11 +44,29 @@ html[data-theme="dark"] {
   height: 50px;
   border-width: 1.5px;
 }
-#expandAllButton[aria-label="すべて閉じる"] {
+#expandAllButton[aria-pressed="true"] {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent-ink);
 }
+
+/* Keep the top-right expand/collapse control visually centered and stateful. */
+#expandAllButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+#expandAllButton svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex: 0 0 20px;
+  transform-origin: 50% 50%;
+}
+
 
 /* More comfortable reading size. */
 body { font-size: 18px; }
@@ -176,6 +194,9 @@ html[data-theme="dark"] .category-section:nth-of-type(5) { --section-soft: #1428
 }
 .qa-card[open] summary {
   background: color-mix(in srgb, var(--section-soft) 75%, var(--surface));
+}
+/* The Q&A divider belongs to its own header, not nested editor summaries. */
+.qa-card[open] > summary {
   border-bottom: 1px solid color-mix(in srgb, var(--section-accent) 18%, var(--line));
 }
 .qa-index {
