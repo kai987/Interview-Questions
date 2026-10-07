@@ -55,7 +55,9 @@
       note.textContent = '表示は質問を含む録音時間です。自分の回答時間は、話す速さに合わせて調整してください。';
       toolbar.after(controls, note);
       const answer = card.querySelector('.answer-text');
-      if (selected(item) !== 'full' && answer) answer.textContent = text(item);
+      // app.js starts with item.answer (standard); sync the selected version even for the default full.
+      // Preserve existing highlights when the rendered text already matches.
+      if (answer && answer.textContent !== text(item)) answer.textContent = text(item);
       updateDurations(card, item);
     });
   }
