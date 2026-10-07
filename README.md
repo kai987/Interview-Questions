@@ -55,6 +55,10 @@ python3 scripts/serve_local.py --port 8000
 
 録音を利用できない場合は「ブラウザ音声で読む」を選べます。Web Speech API (`speechSynthesis`) の日本語音声はブラウザ・OSに依存し、事前の実測時長や位置指定には対応しません。
 
+## Micron 面接題庫
+
+- [Micron Production DX Engineer（JR88130）面接35問](docs/micron-production-dx-jr88130-interview.md) - 非公式の面接体験談17問＋職種特化18問。個人回答はSupabaseの本人限定データに保存。
+
 ## Main files
 
 - `index.html` - ページ構造とセキュリティポリシー
