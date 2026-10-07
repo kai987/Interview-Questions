@@ -58,6 +58,7 @@ python3 scripts/serve_local.py --port 8000
 ## Micron 面接題庫
 
 - [Micron Production DX Engineer（JR88130）面接35問](docs/micron-production-dx-jr88130-interview.md) - 非公式の面接体験談17問＋職種特化18問。個人回答はSupabaseの本人限定データに保存。
+- [面接回答の品質ゲート](docs/interview-answer-quality-gate.md) - 結論／標準／深掘りの内容検査、具体例・根拠、本人限定回答の保護、DB反映後の点検手順。
 
 ## Main files
 
