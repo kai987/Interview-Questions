@@ -1,7 +1,7 @@
 (() => {
-  const SUPABASE_URL = 'https://flpmblfscgcbrprwwckz.supabase.co';
-  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_l2Gja5i6yw4CLv54fJqvWg_01YKpu4Y';
-  const SUPABASE_PROJECT_REF = 'flpmblfscgcbrprwwckz';
+  const SUPABASE_URL = 'https://qxekaaxgsugcneeumjzi.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_9jUDxgO6K0VTOVFkkbaNQg_YPVzFuvJ';
+  const SUPABASE_PROJECT_REF = 'qxekaaxgsugcneeumjzi';
   const SESSION_STORAGE_KEY = `sb-${SUPABASE_PROJECT_REF}-auth-token`;
   const AUDIO_BUCKET = 'interview-audio';
   const AUDIO_LOAD_TIMEOUT_MS = 15000;

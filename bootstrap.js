@@ -4,8 +4,8 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4/+esm';
 import { queueLocalStateMigration, mergeScopedLocalState } from './state-migration.js?v={{ asset_version }}';
 
-const SUPABASE_URL = 'https://flpmblfscgcbrprwwckz.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_l2Gja5i6yw4CLv54fJqvWg_01YKpu4Y';
+const SUPABASE_URL = 'https://qxekaaxgsugcneeumjzi.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_9jUDxgO6K0VTOVFkkbaNQg_YPVzFuvJ';
 const APP_URL = `${window.location.origin}${window.location.pathname}`;
 const ACTIVE_SET_KEY = 'interview-active-set-id';
 
@@ -33,12 +33,26 @@ const authEmail = document.getElementById('authEmail');
 const authPassword = document.getElementById('authPassword');
 const passwordLoginButton = document.getElementById('passwordLoginButton');
 const magicLinkButton = document.getElementById('magicLinkButton');
+const forgotPasswordButton = document.getElementById('forgotPasswordButton');
+const updatePasswordButton = document.getElementById('updatePasswordButton');
+const recoveryFields = document.getElementById('passwordRecoveryFields');
+const newAuthPassword = document.getElementById('newAuthPassword');
+const confirmAuthPassword = document.getElementById('confirmAuthPassword');
 const logoutButton = document.getElementById('logoutButton');
 const authMessage = document.getElementById('authMessage');
 const setSelect = document.getElementById('interviewSetSelect');
 const activeSetTitle = document.getElementById('activeSetTitle');
 const activeSetMeta = document.getElementById('activeSetMeta');
 const heroCompany = document.getElementById('heroCompany');
+let passwordRecoveryOwner = null;
+
+// URL recovery is processed while getSession initializes the SDK. Subscribe
+// before awaiting it, so a cold start cannot miss PASSWORD_RECOVERY.
+supabase.auth.onAuthStateChange((event, nextSession) => {
+  if (event !== 'PASSWORD_RECOVERY' || !nextSession?.user?.id) return;
+  passwordRecoveryOwner = nextSession.user.id;
+  setTimeout(() => { if (session) openAuthDialog(); }, 0);
+});
 
 function showLoadFailure(scope) {
   loadFailure = scope;
@@ -75,8 +89,14 @@ function setAuthMessage(message, type = '') {
 
 function openAuthDialog() {
   if (!authDialog) return;
+  const recovery = Boolean(session?.user?.id && passwordRecoveryOwner === session.user.id);
+  document.getElementById('authDialogTitle').textContent = recovery ? 'パスワードの再設定' : 'プライベートモード';
+  recoveryFields.hidden = !recovery;
+  updatePasswordButton.hidden = !recovery;
+  forgotPasswordButton.hidden = Boolean(session);
+  authEmail.closest('.auth-field').hidden = recovery;
   if (session) {
-    setAuthMessage('ログイン済みです。非公開題庫と個人向け回答を利用できます。', 'success');
+    setAuthMessage(recovery ? '新しいパスワードを入力してください。' : 'ログイン済みです。非公開題庫と個人向け回答を利用できます。', recovery ? '' : 'success');
     logoutButton.hidden = false;
     passwordLoginButton.hidden = true;
     magicLinkButton.hidden = true;
@@ -88,7 +108,7 @@ function openAuthDialog() {
     authPassword.closest('.auth-field')?.removeAttribute('hidden');
     setAuthMessage('登録済みのアカウントでログインしてください。');
   }
-  authDialog.showModal?.();
+  if (!authDialog.open) authDialog.showModal?.();
 }
 
 function closeAuthDialog() {
@@ -338,6 +358,43 @@ async function sendMagicLink() {
   setAuthMessage('メールを確認し、ログインリンクを開いてください。', 'success');
 }
 
+async function sendPasswordReset() {
+  const email = authEmail?.value.trim();
+  if (!email || !authEmail.checkValidity()) return setAuthMessage('正しいメールアドレスを入力してください。', 'error');
+  forgotPasswordButton.disabled = true;
+  setAuthMessage('パスワード再設定メールを送信しています…');
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: APP_URL });
+    if (error) throw error;
+    setAuthMessage('登録済みの場合、再設定メールが届きます。メールのリンクを開いてください。', 'success');
+  } catch (error) {
+    setAuthMessage(error?.message || '送信できませんでした。もう一度お試しください。', 'error');
+  } finally {
+    forgotPasswordButton.disabled = false;
+  }
+}
+
+async function updateRecoveredPassword() {
+  if (!session?.user?.id || passwordRecoveryOwner !== session.user.id) return;
+  const password = newAuthPassword.value;
+  if (password.length < 8) return setAuthMessage('パスワードは8文字以上で入力してください。', 'error');
+  if (password !== confirmAuthPassword.value) return setAuthMessage('確認用のパスワードが一致しません。', 'error');
+  updatePasswordButton.disabled = true;
+  try {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+    newAuthPassword.value = '';
+    confirmAuthPassword.value = '';
+    passwordRecoveryOwner = null;
+    setAuthMessage('パスワードを更新しました。題庫を読み込みます…', 'success');
+    window.location.reload();
+  } catch (error) {
+    setAuthMessage(error?.message || '更新できませんでした。もう一度お試しください。', 'error');
+  } finally {
+    updatePasswordButton.disabled = false;
+  }
+}
+
 async function logout() {
   logoutButton.disabled = true;
   if (stateSync?.hasPending()) {
@@ -358,6 +415,8 @@ authButton?.addEventListener('click', openAuthDialog);
 authCloseButton?.addEventListener('click', closeAuthDialog);
 passwordLoginButton?.addEventListener('click', passwordLogin);
 magicLinkButton?.addEventListener('click', sendMagicLink);
+forgotPasswordButton?.addEventListener('click', sendPasswordReset);
+updatePasswordButton?.addEventListener('click', updateRecoveredPassword);
 logoutButton?.addEventListener('click', logout);
 authDialog?.addEventListener('click', event => {
   if (event.target === authDialog) closeAuthDialog();
@@ -377,6 +436,7 @@ try {
   session = null;
 }
 updateAuthButton();
+if (session?.user?.id && passwordRecoveryOwner === session.user.id) openAuthDialog();
 
 if (session?.user?.id) {
   const ownerId = session.user.id;
@@ -428,8 +488,16 @@ supabase.auth.onAuthStateChange((event, nextSession) => {
   const nextOwner = nextSession?.user?.id || null;
   session = nextSession;
   updateAuthButton();
+  if (event === 'PASSWORD_RECOVERY' && nextSession?.user?.id) {
+    passwordRecoveryOwner = nextSession.user.id;
+    openAuthDialog();
+    return;
+  }
   // Repeated sign-in and token refresh events must not interrupt a practice session.
   if (previousOwner === nextOwner) return;
+  passwordRecoveryOwner = null;
+  newAuthPassword.value = '';
+  confirmAuthPassword.value = '';
   privateDataReady = false;
   stateSync?.stop();
   stateCache.clear();

@@ -30,7 +30,7 @@ from urllib.parse import quote
 
 import _generate_aivis_audio_core as core
 
-PROJECT_REF = "flpmblfscgcbrprwwckz"
+PROJECT_REF = "qxekaaxgsugcneeumjzi"
 STORAGE_KEY = f"sb-{PROJECT_REF}-auth-token"
 DEFAULT_SESSION_FILE = Path("~/.config/interview-questions/supabase-session.json").expanduser()
 DEFAULT_MP3_BITRATE = os.environ.get("AIVIS_MP3_BITRATE", "96k")

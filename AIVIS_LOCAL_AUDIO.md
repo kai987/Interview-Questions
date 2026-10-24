@@ -23,7 +23,7 @@ Local audio is attempted on localhost / 127.0.0.1 / 0.0.0.0 / .local hosts. Serv
 Open the logged-in Interview Questions site in Chrome, then DevTools → Console:
 
 ```js
-copy(localStorage.getItem('sb-flpmblfscgcbrprwwckz-auth-token'))
+copy(localStorage.getItem('sb-qxekaaxgsugcneeumjzi-auth-token'))
 ```
 
 Then:

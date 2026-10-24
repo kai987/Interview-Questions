@@ -85,14 +85,16 @@ python3 scripts/serve_local.py --port 8000
 
 フォーク先で独立して運用する場合は、次の設定が必要です。
 
-1. Supabase側で題庫・質問・個人回答・学習状態のテーブル、認証、RLSを用意します。録音を使う場合は非公開の`interview-audio`バケットも設定します。
+1. 空のSupabaseプロジェクトに[`supabase/schema.sql`](supabase/schema.sql)を適用し、題庫・質問・個人回答・学習状態のテーブルとRLSを用意します。録音を使う場合は非公開の`interview-audio`バケットも設定します。
 2. `bootstrap.js`と`audio-player.js`のプロジェクトURL・publishable keyなどの接続設定を、自分の環境に合わせます。
 3. `index.html`のContent Security Policyにある接続先と、Supabase Authの許可リダイレクト先を合わせます。
 4. 題庫・質問・回答を登録し、公開・非公開それぞれのアクセスを確認します。
 
 フロントエンドの接続設定はソース内に定義されており、`.env`から自動で読み込む構成ではありません。ブラウザにはpublishable keyを使用し、`service_role`などの秘密鍵を含めないでください。
 
-このリポジトリのmigrationは**既存テーブル向けの追加変更**です。データベース全体を新規構築する一式ではありません。
+`supabase/schema.sql`は**空のプロジェクト向けの初期構造**です。既存テーブルのある環境には適用しないでください。アカウント、題庫の内容、録音は含みません。`supabase/migrations/`は既存テーブル向けの追加変更です。
+
+SMTPと日本語メールテンプレートの独立運用、データ移行と切り替え前の確認は、[認証メールの独立運用](docs/independent-auth-email.md)を参照してください。
 
 ## 音声の生成と管理
 

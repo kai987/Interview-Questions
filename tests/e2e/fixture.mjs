@@ -50,14 +50,26 @@ const sdk = `
 export function createClient() {
   return {
     auth: {
-      getSession: async () => fetch('/__e2e__/session').then(response => response.json()),
+      getSession: async () => {
+        const result = await fetch('/__e2e__/session').then(response => response.json());
+        if (result.event) window.__qa.authListeners.forEach(callback => callback(result.event, result.data.session));
+        return result;
+      },
       onAuthStateChange(callback) {
         window.__qa.authListeners.push(callback);
         return { data: { subscription: { unsubscribe() {
           window.__qa.authListeners = window.__qa.authListeners.filter(listener => listener !== callback);
         } } } };
       },
-      signOut: async () => ({ error: null })
+      signOut: async () => ({ error: null }),
+      resetPasswordForEmail: async (email, options) => {
+        window.__qa.authCalls.push({ method: 'resetPasswordForEmail', email, options });
+        return { error: window.__qa.authError ? { message: window.__qa.authError } : null };
+      },
+      updateUser: async attributes => {
+        window.__qa.authCalls.push({ method: 'updateUser', attributes });
+        return { error: window.__qa.authError ? { message: window.__qa.authError } : null };
+      }
     },
     from(table) {
       const filters = [];
@@ -93,6 +105,7 @@ export const test = base.extend({
     const sets = structuredClone(tables.interview_sets);
     const questionRows = structuredClone(questions);
     let sessionUserId = 'e2e-synthetic-user';
+    let initialAuthEvent = null;
     const audioFiles = new Map();
     const audioPaths = [];
     let rejectLocalAudio = false;
@@ -110,7 +123,7 @@ export const test = base.extend({
     watch(page);
     context.on('page', watch);
     await context.addInitScript(() => {
-      window.__qa = { writes: [], saveError: false, audio: [], authListeners: [] };
+      window.__qa = { writes: [], saveError: false, audio: [], authListeners: [], authCalls: [], authError: null };
       const OriginalAudio = window.Audio;
       window.Audio = function (...args) {
         const element = new OriginalAudio(...args);
@@ -124,7 +137,7 @@ export const test = base.extend({
       if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.startsWith('/npm/@supabase/supabase-js@')) {
         return route.fulfill({ contentType: 'application/javascript', body: sdk });
       }
-      if (url.hostname === 'flpmblfscgcbrprwwckz.supabase.co'
+      if (url.hostname === 'qxekaaxgsugcneeumjzi.supabase.co'
         && url.pathname.startsWith('/storage/v1/object/authenticated/interview-audio/e2e-synthetic-user/e2e-fixture/')) {
         audioRequests += 1;
         audioPaths.push(url.pathname);
@@ -142,7 +155,9 @@ export const test = base.extend({
         return route.fulfill({ response, body });
       }
       if (url.pathname === '/__e2e__/session') {
-        return route.fulfill({ json: { data: { session: sessionUserId ? { user: { id: sessionUserId } } : null }, error: null } });
+        const event = initialAuthEvent;
+        initialAuthEvent = null;
+        return route.fulfill({ json: { data: { session: sessionUserId ? { user: { id: sessionUserId } } : null }, event, error: null } });
       }
       if (url.pathname.startsWith('/__e2e__/table/')) {
         const table = url.pathname.split('/').at(-1);
@@ -198,6 +213,7 @@ export const test = base.extend({
         await expect(page.locator('.qa-card')).toHaveCount(questionCount);
       },
       setSession(userId) { sessionUserId = userId; },
+      setInitialAuthEvent(event) { initialAuthEvent = event; },
       async emitAuth(tab, event, userId) {
         sessionUserId = userId;
         await tab.evaluate(async ({ event, userId }) => {

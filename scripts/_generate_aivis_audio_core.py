@@ -29,8 +29,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-DEFAULT_SUPABASE_URL = "https://flpmblfscgcbrprwwckz.supabase.co"
-DEFAULT_SUPABASE_KEY = "sb_publishable_l2Gja5i6yw4CLv54fJqvWg_01YKpu4Y"
+DEFAULT_SUPABASE_URL = "https://qxekaaxgsugcneeumjzi.supabase.co"
+DEFAULT_SUPABASE_KEY = "sb_publishable_9jUDxgO6K0VTOVFkkbaNQg_YPVzFuvJ"
 DEFAULT_AIVIS_URL = "http://127.0.0.1:10101"
 DEFAULT_OUTPUT_DIR = "local-audio"
 

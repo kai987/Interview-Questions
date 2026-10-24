@@ -131,7 +131,7 @@ test('variant playback can fall back to the authenticated versioned storage obje
   const recordings = registerVariants(app);
   app.rejectLocalAudio();
   await context.addInitScript(() => {
-    localStorage.setItem('sb-flpmblfscgcbrprwwckz-auth-token', JSON.stringify({
+    localStorage.setItem('sb-qxekaaxgsugcneeumjzi-auth-token', JSON.stringify({
       access_token: 'synthetic-e2e-token', user: { id: 'e2e-synthetic-user' }
     }));
   });
@@ -197,7 +197,7 @@ test('immutable audio path is used only for its matching owner, set, question an
   app.setPrivateContent(1, { audio_variants: recordings });
   app.setAudioFile(recording.object_path.split('/').at(-1), makeAudioFixture(20));
   await context.addInitScript(() => {
-    localStorage.setItem('sb-flpmblfscgcbrprwwckz-auth-token', JSON.stringify({
+    localStorage.setItem('sb-qxekaaxgsugcneeumjzi-auth-token', JSON.stringify({
       access_token: 'synthetic-e2e-token', user: { id: 'e2e-synthetic-user' }
     }));
   });
@@ -229,7 +229,7 @@ test('authentication failure is visible and browser speech requires an explicit 
   app.rejectLocalAudio();
   app.allowWarning('Failed to load resource');
   await context.addInitScript(() => {
-    localStorage.setItem('sb-flpmblfscgcbrprwwckz-auth-token', JSON.stringify({
+    localStorage.setItem('sb-qxekaaxgsugcneeumjzi-auth-token', JSON.stringify({
       access_token: 'synthetic-expired-token', user: { id: 'e2e-synthetic-user' }
     }));
     speechSynthesis.speak = utterance => { window.__chosenSpeech = utterance.text; };

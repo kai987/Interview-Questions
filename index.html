@@ -9,7 +9,7 @@
   <meta name="description" content="面接対策用の質問・回答練習サイト。題庫はSupabaseから読み込み、個人向け回答はログイン後のみ表示。" />
   <meta name="robots" content="noindex,nofollow,noarchive" />
   <meta name="referrer" content="no-referrer" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://flpmblfscgcbrprwwckz.supabase.co wss://flpmblfscgcbrprwwckz.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://qxekaaxgsugcneeumjzi.supabase.co wss://qxekaaxgsugcneeumjzi.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests" />
   <title>Interview Questions</title>
   <link rel="icon" type="image/png" sizes="32x32" href="favicon.png?v={{ asset_version }}" />
   <link rel="icon" type="image/svg+xml" sizes="any" href="favicon.svg?v={{ asset_version }}" />
@@ -144,9 +144,21 @@
         <label for="authPassword">パスワード</label>
         <input id="authPassword" type="password" autocomplete="current-password" />
       </div>
+      <div id="passwordRecoveryFields" hidden>
+        <div class="auth-field">
+          <label for="newAuthPassword">新しいパスワード（8文字以上）</label>
+          <input id="newAuthPassword" type="password" autocomplete="new-password" minlength="8" />
+        </div>
+        <div class="auth-field">
+          <label for="confirmAuthPassword">新しいパスワード（確認）</label>
+          <input id="confirmAuthPassword" type="password" autocomplete="new-password" minlength="8" />
+        </div>
+      </div>
       <div class="auth-actions">
         <button class="auth-action auth-action--primary" id="passwordLoginButton" type="button">パスワードでログイン</button>
         <button class="auth-action" id="magicLinkButton" type="button">Magic Linkを送信</button>
+        <button class="auth-action" id="forgotPasswordButton" type="button">パスワードを忘れた方</button>
+        <button class="auth-action auth-action--primary" id="updatePasswordButton" type="button" hidden>新しいパスワードを保存</button>
         <button class="auth-action auth-action--danger" id="logoutButton" type="button" hidden>ログアウト</button>
       </div>
       <p class="auth-message" id="authMessage" role="status" aria-live="polite"></p>
