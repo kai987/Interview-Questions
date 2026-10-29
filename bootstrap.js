@@ -3,6 +3,7 @@
 {% assign asset_version = site.github.build_revision | default: 'dev' %}
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4/+esm';
 import { queueLocalStateMigration, mergeScopedLocalState } from './state-migration.js?v={{ asset_version }}';
+import * as searchCore from './search-core.js?v={{ asset_version }}';
 
 const SUPABASE_URL = 'https://qxekaaxgsugcneeumjzi.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_9jUDxgO6K0VTOVFkkbaNQg_YPVzFuvJ';
@@ -10,6 +11,7 @@ const APP_URL = `${window.location.origin}${window.location.pathname}`;
 const ACTIVE_SET_KEY = 'interview-active-set-id';
 const preferences = window.InterviewStorage.preferences;
 const durableStorage = window.InterviewStorage.durable;
+window.InterviewSearch = { ...searchCore };
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
@@ -281,20 +283,34 @@ function writeLocalState(rows) {
 
 async function loadPrivateData() {
   if (!session?.user?.id) return;
+  const ownerId = session.user.id;
   const currentIds = new Set((window.INTERVIEW_DATA || []).map(item => Number(item.id)));
   if (!currentIds.size) {
     return;
   }
 
-  const [contentResult, stateResult] = await Promise.all([
-    supabase.from('interview_private_content').select('question_id,answer,outline,tags,answer_variants,audio_text_hash,duration_seconds,audio_variants').order('question_id'),
-    supabase.from('interview_user_state').select('question_id,favorite,practiced,mastery,own_answer,last_practiced_at').order('question_id')
-  ]);
-  if (contentResult.error) throw contentResult.error;
-  if (stateResult.error) throw stateResult.error;
-
-  const scopedContent = (contentResult.data || []).filter(row => currentIds.has(Number(row.question_id)));
-  const scopedState = (stateResult.data || []).filter(row => currentIds.has(Number(row.question_id)));
+  // Bound both URL length and result size below the API's default row limit.
+  // Apply the collected snapshot only after every batch succeeds.
+  const ids = [...currentIds];
+  const scopedContent = [];
+  const scopedState = [];
+  for (let offset = 0; offset < ids.length; offset += 200) {
+    const batch = ids.slice(offset, offset + 200);
+    const batchIds = new Set(batch);
+    const [contentResult, stateResult] = await Promise.all([
+      supabase.from('interview_private_content')
+        .select('question_id,answer,outline,tags,answer_variants,audio_text_hash,duration_seconds,audio_variants')
+        .eq('user_id', ownerId).in('question_id', batch).order('question_id'),
+      supabase.from('interview_user_state')
+        .select('question_id,favorite,practiced,mastery,own_answer,last_practiced_at')
+        .eq('user_id', ownerId).in('question_id', batch).order('question_id')
+    ]);
+    if (contentResult.error) throw contentResult.error;
+    if (stateResult.error) throw stateResult.error;
+    scopedContent.push(...(contentResult.data || []).filter(row => batchIds.has(Number(row.question_id))));
+    scopedState.push(...(stateResult.data || []).filter(row => batchIds.has(Number(row.question_id))));
+  }
+  if (session?.user?.id !== ownerId) throw new Error('Account changed while loading private data');
   mergePrivateContent(scopedContent);
   queueLocalStateMigration({ questionIds: currentIds, remoteRows: scopedState, local: readLocalState(), sync: stateSync });
   const merged = new Map(scopedState.map(row => [Number(row.question_id), row]));

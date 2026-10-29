@@ -73,7 +73,9 @@
     parts.forEach((part, index) => {
       const chip = document.createElement('span');
       chip.className = 'answer-outline__chip';
-      chip.textContent = part;
+      if (window.InterviewSearch) {
+        chip.innerHTML = window.InterviewSearch.highlight(part, window.InterviewSearch.getQuery?.() || '');
+      } else chip.textContent = part;
       flow.appendChild(chip);
       if (index < parts.length - 1) {
         const arrow = document.createElement('span');

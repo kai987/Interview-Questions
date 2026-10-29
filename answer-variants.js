@@ -8,6 +8,17 @@
   function selected(item) { return selection.get(Number(item.id)) || 'full'; }
   function text(item) { return item.answerVariants?.[selected(item)] || item.answer || ''; }
   window.InterviewAnswers = { text, selected };
+  function renderAnswer(card, item) {
+    const answer = card.querySelector('.answer-text');
+    if (!answer) return;
+    const search = window.InterviewSearch;
+    if (!search) {
+      if (answer.textContent !== text(item)) answer.textContent = text(item);
+      return;
+    }
+    const html = search.highlight(text(item), search.getQuery?.() || '');
+    if (answer.innerHTML !== html) answer.innerHTML = html;
+  }
   function formatDuration(seconds) {
     if (!Number.isFinite(seconds) || seconds <= 0) return '--:--';
     const whole = Math.floor(seconds);
@@ -54,10 +65,8 @@
       const note = document.createElement('p'); note.className = 'answer-duration-note';
       note.textContent = '表示は質問を含む録音時間です。自分の回答時間は、話す速さに合わせて調整してください。';
       toolbar.after(controls, note);
-      const answer = card.querySelector('.answer-text');
-      // app.js starts with item.answer (standard); sync the selected version even for the default full.
-      // Preserve existing highlights when the rendered text already matches.
-      if (answer && answer.textContent !== text(item)) answer.textContent = text(item);
+      // Keep the selected prose and its search highlights on newly rendered cards.
+      renderAnswer(card, item);
       updateDurations(card, item);
     });
   }
@@ -68,7 +77,7 @@
     const item = byId.get(Number(card.id.slice(2)));
     selection.set(Number(item.id), button.dataset.answerLength);
     window.InterviewAudioPlayer?.stop();
-    card.querySelector('.answer-text').textContent = text(item);
+    renderAnswer(card, item);
     card.querySelectorAll('[data-answer-length]').forEach(control => control.setAttribute('aria-pressed', String(control === button)));
     // Length controls select prose; do not leave it hidden by keyword mode.
     document.querySelector('[data-toggle-group="answer"][data-toggle-value="full"]')?.click();

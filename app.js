@@ -18,6 +18,7 @@
   const remainingCount = document.getElementById('remainingCount');
   const readingSizeButtons = [...document.querySelectorAll('[data-reading-size]')];
   const preferences = window.InterviewStorage.preferences;
+  const { escapeHtml, highlight, matches } = window.InterviewSearch;
 
   let activeCategory = 'all';
   let currentQuery = '';
@@ -29,7 +30,7 @@
   let scrollActiveCategory = null;
   let scrollTicking = false;
 
-  const normalize = (text) => (text || '').toLowerCase().normalize('NFKC').replace(/\s+/g, ' ').trim();
+  window.InterviewSearch.getQuery = () => currentQuery;
   const categories = [...new Set(data.map(item => item.category))];
   const favoriteIds = loadIdSet('interview-favorites');
   const practicedIds = loadIdSet('interview-practiced');
@@ -55,24 +56,6 @@
       const outside = Array.isArray(stored) ? stored.map(Number).filter(id => !data.some(item => item.id === id)) : [];
       localStorage.setItem(key, JSON.stringify([...new Set([...outside, ...set])]));
     } catch { /* The current action is still sent through the durable sync queue. */ }
-  }
-
-  function escapeHtml(str) {
-    return String(str).replace(/[&<>'\"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[char]));
-  }
-
-  function highlight(text, query) {
-    if (!query) return escapeHtml(text);
-    const safe = escapeHtml(text);
-    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    try { return safe.replace(new RegExp(`(${escapedQuery})`, 'ig'), '<mark>$1</mark>'); }
-    catch { return safe; }
-  }
-
-  function matches(item, query) {
-    if (!query) return true;
-    const haystack = normalize([item.question, item.questionZh, item.answer, ...(item.tags || [])].join(' '));
-    return haystack.includes(normalize(query));
   }
 
   function filteredItems() {
@@ -162,7 +145,7 @@
         <div class="qa-answer">
           <div class="qa-toolbar"><button class="speech-button" type="button" data-speech-id="${item.id}" aria-label="この問答を読み上げる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg><span>音声で練習</span></button><span class="audio-source-note">00:00 / --:--</span><span class="audio-seek-control"><span class="audio-seek-track" aria-hidden="true"></span><input class="audio-seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="音声の再生位置" disabled /></span></div>
           <p class="answer-label">${item.category === '逆質問' ? '逆質問のねらい' : '回答例'}</p>
-          <div class="answer-text">${highlight(item.answer, query)}</div>
+          <div class="answer-text">${highlight(window.InterviewAnswers?.text(item) || item.answerVariants?.full || item.answer, query)}</div>
           ${(item.tags || []).length ? `<div class="tags">${item.tags.map(tag => `<span class="tag">${highlight(tag, query)}</span>`).join('')}</div>` : ''}
         </div>
       </details>`;

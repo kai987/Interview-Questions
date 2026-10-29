@@ -78,6 +78,7 @@ export function createClient() {
         select() { return this; },
         order(field, options = {}) { orders.push({ field, ascending: options.ascending !== false }); return this; },
         eq(field, value) { filters.push({ field, value }); return this; },
+        in(field, values) { filters.push({ field, values, operator: 'in' }); return this; },
         upsert: async (rows, options = {}) => {
           window.__qa.writes.push({ rows, options });
           if (window.__qa.saveError) return { error: { message: 'Synthetic save failure' } };
@@ -98,6 +99,9 @@ export const test = base.extend({
     const unexpectedRequests = [];
     const allowedWarnings = new Set();
     const failures = new Map();
+    const failedReadNumbers = new Map();
+    const tableReads = [];
+    const tableReadCounts = new Map();
     const remoteState = new Map();
     const failedQuestionIds = new Set();
     const rowKey = (userId, questionId) => `${userId}:${questionId}`;
@@ -163,11 +167,15 @@ export const test = base.extend({
         const table = url.pathname.split('/').at(-1);
         const remaining = failures.get(table) || 0;
         if (remaining) failures.set(table, remaining - 1);
+        const ordinal = (tableReadCounts.get(table) || 0) + 1;
+        tableReadCounts.set(table, ordinal);
+        const failed = Boolean(remaining || failedReadNumbers.get(table)?.has(ordinal));
+        const filters = JSON.parse(url.searchParams.get('filters') || '[]');
         let rows = table === 'interview_user_state' ? [...remoteState.values()].filter(row => row.user_id === sessionUserId)
           : table === 'interview_private_content' ? [...privateContent.values()].filter(row => row.user_id === sessionUserId)
           : table === 'interview_sets' ? sets : table === 'interview_questions' ? questionRows : [];
-        for (const { field, value } of JSON.parse(url.searchParams.get('filters') || '[]')) {
-          rows = rows.filter(row => row[field] === value);
+        for (const { field, value, values, operator } of filters) {
+          rows = rows.filter(row => operator === 'in' ? values.includes(row[field]) : row[field] === value);
         }
         const orders = JSON.parse(url.searchParams.get('orders') || '[]');
         rows = [...rows].sort((left, right) => {
@@ -177,8 +185,10 @@ export const test = base.extend({
           }
           return 0;
         });
+        rows = rows.slice(0, 1000);
+        tableReads.push({ table, filters, ordinal, failed, questionIds: failed ? [] : rows.map(row => row.question_id).filter(Number.isInteger) });
         return route.fulfill({
-          json: remaining
+          json: failed
             ? { data: null, error: { message: `Synthetic ${table} failure` } }
             : { data: rows, error: null }
         });
@@ -230,6 +240,11 @@ export const test = base.extend({
         }
       },
       failNext(table, count = 1) { failures.set(table, count); },
+      failOnRead(table, ordinal) {
+        if (!failedReadNumbers.has(table)) failedReadNumbers.set(table, new Set());
+        failedReadNumbers.get(table).add(ordinal);
+      },
+      get tableReads() { return structuredClone(tableReads); },
       setSaveFailure(value) { saveFailure = value; },
       failQuestionSave(id, value = true) { value ? failedQuestionIds.add(id) : failedQuestionIds.delete(id); },
       setRemoteState(row) { const value = { user_id: sessionUserId, ...structuredClone(row) }; remoteState.set(rowKey(value.user_id, value.question_id), value); },
