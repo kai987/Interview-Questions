@@ -58,6 +58,77 @@ test('failure of durable storage is visible, not falsely reported as local saved
   assert.equal(store.getStatus(1), 'local-error');
 });
 
+test('durable offline changes are pending without being unpersisted', async () => {
+  const storage = memory();
+  const store = createStateSync({ storage, ownerId: 'a', send: async () => { throw Error('offline'); } });
+  assert.equal(store.hasUnpersisted(), false);
+  store.save(1, { own_answer: 'durable offline answer' }, { defer: true });
+  assert.equal(store.hasPending(), true);
+  assert.equal(store.hasUnpersisted(), false);
+  await store.retry();
+  assert.equal(store.getStatus(1), 'error');
+  assert.equal(store.hasPending(), true);
+  assert.equal(store.hasUnpersisted(), false);
+});
+
+test('unpersisted changes remain volatile while storage and cloud writes fail', async () => {
+  const storage = memory();
+  storage.setItem = () => { throw Error('quota'); };
+  const store = createStateSync({ storage, ownerId: 'a', send: async () => { throw Error('offline'); } });
+  store.save(1, { own_answer: 'only in this tab' }, { defer: true });
+  assert.equal(store.hasUnpersisted(), true);
+  await store.retry();
+  assert.equal(store.hasUnpersisted(), true);
+  assert.equal(store.hasPending(), true);
+  assert.equal(store.getStatus(1), 'local-error');
+  assert.equal(storage.length, 0);
+});
+
+test('retry persists the same volatile revision when storage recovers even while offline', async () => {
+  const storage = memory();
+  const set = storage.setItem;
+  let rejectedKey;
+  storage.setItem = key => { rejectedKey = key; throw Error('quota'); };
+  const options = { storage, ownerId: 'a', send: async () => { throw Error('offline'); } };
+  const store = createStateSync(options);
+  store.save(1, { own_answer: 'must survive a reload', favorite: true }, { defer: true });
+  assert.equal(store.hasUnpersisted(), true);
+  storage.setItem = set;
+  await store.retry();
+  assert.equal(store.hasUnpersisted(), false);
+  assert.equal(store.hasPending(), true);
+  assert.equal(store.getStatus(1), 'error');
+  assert.equal(storage.key(0), rejectedKey);
+  store.stop();
+  const restored = createStateSync(options);
+  assert.equal(restored.hasUnpersisted(), false);
+  assert.deepEqual(restored.pendingRows(), [{ question_id: 1, own_answer: 'must survive a reload', favorite: true }]);
+});
+
+test('cloud acknowledgement clears a volatile draft even if every storage accessor remains blocked', async () => {
+  const storage = new Proxy({}, { get() { throw Error('storage getter blocked'); } });
+  const sent = [];
+  const store = createStateSync({ storage, ownerId: 'a', send: async (_, row) => sent.push(row) });
+  store.save(1, { own_answer: 'saved directly to cloud' }, { defer: true });
+  assert.equal(store.hasUnpersisted(), true);
+  await store.retry();
+  assert.deepEqual(sent, [{ own_answer: 'saved directly to cloud' }]);
+  assert.equal(store.hasUnpersisted(), false);
+  assert.equal(store.hasPending(), false);
+  assert.equal(store.getStatus(1), 'synced');
+});
+
+test('a failed cloud send retains a volatile draft when every storage accessor is blocked', async () => {
+  const storage = new Proxy({}, { get() { throw Error('storage getter blocked'); } });
+  const store = createStateSync({ storage, ownerId: 'a', send: async () => { throw Error('offline'); } });
+  store.save(1, { own_answer: 'still only in memory' }, { defer: true });
+  await store.retry();
+  assert.equal(store.hasUnpersisted(), true);
+  assert.equal(store.hasPending(), true);
+  assert.equal(store.getStatus(1), 'local-error');
+  assert.deepEqual(store.pendingRows(), [{ question_id: 1, own_answer: 'still only in memory' }]);
+});
+
 function deferred() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });

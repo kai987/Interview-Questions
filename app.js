@@ -17,6 +17,7 @@
   const practicedCount = document.getElementById('practicedCount');
   const remainingCount = document.getElementById('remainingCount');
   const readingSizeButtons = [...document.querySelectorAll('[data-reading-size]')];
+  const preferences = window.InterviewStorage.preferences;
 
   let activeCategory = 'all';
   let currentQuery = '';
@@ -24,7 +25,7 @@
   let speakingId = null;
   let toastTimer = null;
   let allExpanded = false;
-  let practiceMode = localStorage.getItem('interview-practice-mode') === 'true';
+  let practiceMode = preferences.getItem('interview-practice-mode') === 'true';
   let scrollActiveCategory = null;
   let scrollTicking = false;
 
@@ -215,8 +216,8 @@
   }
 
   function showToast(message) { clearTimeout(toastTimer); toast.textContent = message; toast.classList.add('is-visible'); toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2200); }
-  function applyTheme(theme) { document.documentElement.dataset.theme = theme; localStorage.setItem('interview-theme', theme); }
-  function initTheme() { const saved = localStorage.getItem('interview-theme'); if (saved === 'light' || saved === 'dark') return applyTheme(saved); applyTheme(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
+  function applyTheme(theme) { document.documentElement.dataset.theme = theme; preferences.setItem('interview-theme', theme); }
+  function initTheme() { const saved = preferences.getItem('interview-theme'); if (saved === 'light' || saved === 'dark') return applyTheme(saved); applyTheme(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
 
   function applyReadingSize(size, persist = true) {
     const allowed = ['small', 'medium', 'large'];
@@ -227,16 +228,16 @@
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-pressed', String(active));
     });
-    if (persist) localStorage.setItem('interview-reading-size', next);
+    if (persist) preferences.setItem('interview-reading-size', next);
   }
 
   function initReadingSize() {
-    applyReadingSize(localStorage.getItem('interview-reading-size') || 'medium', false);
+    applyReadingSize(preferences.getItem('interview-reading-size') || 'medium', false);
   }
 
   function setPracticeMode(enabled) {
     practiceMode = enabled;
-    localStorage.setItem('interview-practice-mode', String(enabled));
+    preferences.setItem('interview-practice-mode', String(enabled));
     revealedIds.clear();
     allExpanded = false;
     renderQuestions();

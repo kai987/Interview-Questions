@@ -8,6 +8,8 @@ const SUPABASE_URL = 'https://qxekaaxgsugcneeumjzi.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_9jUDxgO6K0VTOVFkkbaNQg_YPVzFuvJ';
 const APP_URL = `${window.location.origin}${window.location.pathname}`;
 const ACTIVE_SET_KEY = 'interview-active-set-id';
+const preferences = window.InterviewStorage.preferences;
+const durableStorage = window.InterviewStorage.durable;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
@@ -23,6 +25,7 @@ let interviewSets = [];
 let activeSet = null;
 const stateCache = new Map();
 let stateSync = null;
+let stateSyncOwnerId = null;
 let privateDataReady = false;
 let loadFailure = null;
 
@@ -123,7 +126,11 @@ function updateAuthButton() {
 }
 
 function chooseActiveSet(sets) {
-  const saved = Number(localStorage.getItem(ACTIVE_SET_KEY));
+  // A URL also carries the selection when browser preferences cannot be saved.
+  const requested = Number(new URL(window.location.href).searchParams.get('set'));
+  const linked = sets.find(set => Number(set.id) === requested);
+  if (linked) return linked;
+  const saved = Number(preferences.getItem(ACTIVE_SET_KEY));
   if (Number.isFinite(saved)) {
     const matched = sets.find(set => Number(set.id) === saved);
     if (matched) return matched;
@@ -183,7 +190,7 @@ async function loadInterviewLibrary() {
     return [];
   }
 
-  localStorage.setItem(ACTIVE_SET_KEY, String(activeSet.id));
+  preferences.setItem(ACTIVE_SET_KEY, String(activeSet.id));
   const { data: questions, error: questionError } = await supabase
     .from('interview_questions')
     .select('id,category,question,question_zh,sort_order')
@@ -326,6 +333,7 @@ window.InterviewPrivateStore = {
   getSyncStatus: id => stateSync?.getStatus(id) || 'local',
   retry: () => stateSync?.retry(),
   hasPending: () => stateSync?.hasPending() || false,
+  hasUnpersisted: hasUnpersistedDrafts,
   isAuthenticated: () => Boolean(session),
   isReady: () => privateDataReady,
   openLogin: openAuthDialog
@@ -421,11 +429,81 @@ logoutButton?.addEventListener('click', logout);
 authDialog?.addEventListener('click', event => {
   if (event.target === authDialog) closeAuthDialog();
 });
-setSelect?.addEventListener('change', event => {
+function hasUnpersistedDrafts() {
+  // An auth change must still clear the previous account's rendered content.
+  return Boolean(session?.user?.id === stateSyncOwnerId && stateSync?.hasUnpersisted());
+}
+
+let unsavedDraftNotice = null;
+function updateDraftNotice() {
+  if (!hasUnpersistedDrafts()) {
+    unsavedDraftNotice?.remove();
+    unsavedDraftNotice = null;
+  }
+}
+
+async function retryDrafts() {
+  let timeout;
+  try {
+    // Leave a slow cloud request running, while allowing the user to keep editing.
+    await Promise.race([
+      stateSync?.retry(),
+      new Promise(resolve => { timeout = setTimeout(resolve, 2000); })
+    ]);
+  } catch {
+    // Keep the draft and its leave protection if retry itself is unavailable.
+  } finally {
+    clearTimeout(timeout);
+    updateDraftNotice();
+  }
+}
+
+function showDraftNotice() {
+  if (unsavedDraftNotice) return;
+  const notice = document.createElement('div');
+  notice.id = 'unsavedDraftNotice';
+  notice.className = 'library-load-notice';
+  notice.setAttribute('role', 'alert');
+  const text = document.createElement('span');
+  text.textContent = '未保存の入力があります。題庫の切り替えを中止しました。同期を再試行するか、入力をコピーして保管してください。';
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.textContent = '同期を再試行';
+  retry.addEventListener('click', async () => {
+    retry.disabled = true;
+    try { await retryDrafts(); } finally { retry.disabled = false; }
+  });
+  notice.append(text, retry);
+  document.querySelector('.interview-library-wrap')?.append(notice);
+  unsavedDraftNotice = notice;
+}
+
+window.addEventListener('interview-sync', updateDraftNotice);
+window.addEventListener('beforeunload', event => {
+  if (!hasUnpersistedDrafts()) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+
+setSelect?.addEventListener('change', async event => {
   const nextId = Number(event.target.value);
-  if (!Number.isFinite(nextId) || Number(activeSet?.id) === nextId) return;
-  localStorage.setItem(ACTIVE_SET_KEY, String(nextId));
-  window.location.reload();
+  if (!interviewSets.some(set => Number(set.id) === nextId) || Number(activeSet?.id) === nextId) return;
+  setSelect.value = String(activeSet.id);
+  setSelect.disabled = true;
+  try {
+    if (hasUnpersistedDrafts()) await retryDrafts();
+    if (hasUnpersistedDrafts()) {
+      showDraftNotice();
+      return;
+    }
+    preferences.setItem(ACTIVE_SET_KEY, String(nextId));
+    const target = new URL(window.location.href);
+    target.searchParams.set('set', String(nextId));
+    target.hash = '';
+    window.location.assign(target.href);
+  } finally {
+    setSelect.disabled = interviewSets.length <= 1;
+  }
 });
 
 try {
@@ -440,9 +518,10 @@ if (session?.user?.id && passwordRecoveryOwner === session.user.id) openAuthDial
 
 if (session?.user?.id) {
   const ownerId = session.user.id;
+  stateSyncOwnerId = ownerId;
   const { createStateSync } = await import('./sync-store.js?v={{ asset_version }}');
   stateSync = createStateSync({
-    storage: localStorage, ownerId,
+    storage: durableStorage, ownerId,
     async send(id, row, { migration = {}, changes = row } = {}) {
       if (session?.user?.id !== ownerId) throw new Error('Account changed');
       // A legacy UI cache only fills a missing cloud row. It cannot replace an

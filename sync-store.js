@@ -86,6 +86,14 @@ export function createStateSync({ storage, ownerId, send, notify = () => {}, del
     while (!stopped) {
       const covered = readRecords().filter(entry => entry.id === id);
       if (!covered.length) { status(id, 'synced'); return; }
+      // Storage may recover before the network does. Persist the original
+      // immutable revisions again so a failed cloud retry can still leave a
+      // reload-safe outbox instead of a draft that exists only in this tab.
+      for (const entry of covered) {
+        if (!entry.durable) {
+          try { persist(entry); } catch { /* Keep the volatile draft in memory. */ }
+        }
+      }
       status(id, 'syncing');
       try {
         const ordered = covered.sort(compareEntries);
@@ -107,7 +115,10 @@ export function createStateSync({ storage, ownerId, send, notify = () => {}, del
         // Delete only keys captured before sending. A new revision created by
         // either tab during this request has a different key and survives.
         for (const entry of covered) {
-          storage.removeItem(entry.key);
+          // A revision that never reached storage has no disk key to remove.
+          // Its cloud acknowledgement is enough to release the memory draft,
+          // even while browser storage access remains completely blocked.
+          if (entry.durable) storage.removeItem(entry.key);
           records.delete(entry.key);
         }
       } catch {
@@ -177,6 +188,7 @@ export function createStateSync({ storage, ownerId, send, notify = () => {}, del
       return current && current !== 'synced' ? current : 'local';
     },
     hasPending: () => newestByQuestion().size > 0,
+    hasUnpersisted: () => readRecords().some(entry => !entry.durable),
     stop() { stopped = true; timers.forEach(clearTimeout); },
     discard() {
       this.stop();

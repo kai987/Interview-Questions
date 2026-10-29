@@ -3,9 +3,10 @@
   const studyTools = document.querySelector('.study-tools');
   const questionSections = document.getElementById('questionSections');
   if (!studyTools || !questionSections) return;
+  const preferences = window.InterviewStorage.preferences;
 
-  let chineseHintsEnabled = localStorage.getItem('interview-chinese-hints') === 'true';
-  let answerView = localStorage.getItem('interview-answer-view') === 'outline' ? 'outline' : 'full';
+  let chineseHintsEnabled = preferences.getItem('interview-chinese-hints') === 'true';
+  let answerView = preferences.getItem('interview-answer-view') === 'outline' ? 'outline' : 'full';
 
   function createButton(label, value, group) {
     const button = document.createElement('button');
@@ -47,10 +48,10 @@
       if (!button) return;
       if (button.dataset.toggleGroup === 'chinese') {
         chineseHintsEnabled = button.dataset.toggleValue === 'on';
-        localStorage.setItem('interview-chinese-hints', String(chineseHintsEnabled));
+        preferences.setItem('interview-chinese-hints', String(chineseHintsEnabled));
       } else if (button.dataset.toggleGroup === 'answer') {
         answerView = button.dataset.toggleValue === 'outline' ? 'outline' : 'full';
-        localStorage.setItem('interview-answer-view', answerView);
+        preferences.setItem('interview-answer-view', answerView);
       }
       applyState();
     });

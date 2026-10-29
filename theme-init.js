@@ -2,7 +2,7 @@
   const THEME_KEY = 'interview-theme';
 
   try {
-    const savedTheme = localStorage.getItem(THEME_KEY);
+    const savedTheme = window.InterviewStorage.preferences.getItem(THEME_KEY);
     const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
     const theme = savedTheme === 'light' || savedTheme === 'dark'
       ? savedTheme

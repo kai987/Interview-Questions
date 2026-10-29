@@ -13,6 +13,7 @@
   const toast = document.getElementById('toast');
 
   if (!questionSections || !data.length) return;
+  const preferences = window.InterviewStorage.preferences;
 
   const MASTERY_KEY = 'interview-mastery';
   const OWN_ANSWERS_KEY = 'interview-own-answers';
@@ -20,7 +21,7 @@
 
   let mastery = loadObject(MASTERY_KEY);
   let ownAnswers = loadObject(OWN_ANSWERS_KEY);
-  let selectedTimerSeconds = Number(localStorage.getItem(TIMER_SECONDS_KEY)) || 60;
+  let selectedTimerSeconds = Number(preferences.getItem(TIMER_SECONDS_KEY)) || 60;
   if (![30, 60, 90].includes(selectedTimerSeconds)) selectedTimerSeconds = 60;
 
   let activeTimerId = null;
@@ -35,7 +36,7 @@
   let sessionDone = false;
   const history = loadObject('interview-review-history');
   const sessionStore = window.InterviewPracticeSessions.create({
-    storage: localStorage,
+    storage: window.InterviewStorage.durable,
     ownerId: window.InterviewPrivateStore?.getOwnerId?.(),
     setId: window.InterviewLibrary?.activeSet?.id,
     questionIds: data.filter(item => item.category !== '逆質問').map(item => Number(item.id))
@@ -200,7 +201,7 @@
     const next = Number(seconds);
     if (![30, 60, 90].includes(next)) return;
     selectedTimerSeconds = next;
-    localStorage.setItem(TIMER_SECONDS_KEY, String(next));
+    preferences.setItem(TIMER_SECONDS_KEY, String(next));
     timerSecondsButtons.forEach(button => {
       const active = Number(button.dataset.timerSeconds) === next;
       button.classList.toggle('is-active', active);
