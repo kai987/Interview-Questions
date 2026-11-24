@@ -47,6 +47,12 @@ const tables = {
 };
 
 const sdk = `
+async function authReply() {
+  if (window.__qa.authDelay) await new Promise(resolve => setTimeout(resolve, window.__qa.authDelay));
+  if (window.__qa.authThrow) throw new TypeError('Failed to fetch');
+  const error = window.__qa.authError;
+  return { error: typeof error === 'string' ? { message: error } : error || null };
+}
 export function createClient() {
   return {
     auth: {
@@ -62,13 +68,21 @@ export function createClient() {
         } } } };
       },
       signOut: async () => ({ error: null }),
+      signInWithPassword: async ({ email, password }) => {
+        window.__qa.authCalls.push({ method: 'signInWithPassword', email, hasPassword: Boolean(password) });
+        return authReply();
+      },
+      signInWithOtp: async ({ email, options }) => {
+        window.__qa.authCalls.push({ method: 'signInWithOtp', email, options });
+        return authReply();
+      },
       resetPasswordForEmail: async (email, options) => {
         window.__qa.authCalls.push({ method: 'resetPasswordForEmail', email, options });
-        return { error: window.__qa.authError ? { message: window.__qa.authError } : null };
+        return authReply();
       },
       updateUser: async attributes => {
         window.__qa.authCalls.push({ method: 'updateUser', attributes });
-        return { error: window.__qa.authError ? { message: window.__qa.authError } : null };
+        return authReply();
       }
     },
     from(table) {

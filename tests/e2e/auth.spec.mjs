@@ -42,3 +42,67 @@ test('changing account replaces private content and keeps the old owner pending 
   await app.emitAuth(page, 'SIGNED_IN', 'e2e-synthetic-user');
   await expect(page.locator('[data-own-answer-id="1"]')).toHaveValue('最初のユーザーの未同期草稿');
 });
+
+
+test('invalid credentials show actionable Japanese feedback above recovery actions', async ({ page, app }) => {
+  app.setSession(null);
+  await app.open();
+  await page.locator('#authButton').click();
+  await page.locator('#authEmail').fill('fixture@example.test');
+  await page.locator('#authPassword').fill('fixture-password');
+  await page.evaluate(() => {
+    window.__qa.authError = { code: 'invalid_credentials', status: 400, message: 'Invalid login credentials' };
+  });
+  await page.locator('#passwordLoginButton').click();
+  const notice = page.locator('#authMessage');
+  await expect(notice).toHaveAttribute('data-type', 'error');
+  await expect(notice).toContainText('ログインできませんでした');
+  await expect(notice).toContainText('ブラウザーに保存された古いパスワード');
+  await expect(notice).toContainText('Magic Linkを送信');
+  await expect(notice).toContainText('パスワードを忘れた方');
+  await expect(notice).not.toContainText('Invalid login credentials');
+  await expect(page.locator('#authPassword')).toHaveValue('fixture-password');
+  await expect(page.locator('#passwordLoginButton')).toBeEnabled();
+  await expect(page.locator('#magicLinkButton')).toBeEnabled();
+  await expect(page.locator('#forgotPasswordButton')).toBeEnabled();
+  expect(await page.evaluate(() => {
+    const notice = document.getElementById('authMessage');
+    const button = document.getElementById('magicLinkButton');
+    const dialog = document.getElementById('authDialog');
+    return notice.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING && dialog.scrollWidth <= dialog.clientWidth + 1;
+  })).toBe(true);
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+  await expect(notice).toBeVisible();
+  await page.locator('#authPassword').fill('another-fixture-password');
+  await expect(notice).toBeEmpty();
+  expect(await page.evaluate(() => window.__qa.authCalls.length)).toBe(1);
+});
+
+test('network exceptions and email rate limits recover buttons and never register a new user', async ({ page, app }) => {
+  app.setSession(null);
+  await app.open();
+  await page.locator('#authButton').click();
+  await page.locator('#authEmail').fill('fixture@example.test');
+  await page.locator('#authPassword').fill('fixture-password');
+  await page.evaluate(() => { window.__qa.authThrow = true; });
+  await page.locator('#passwordLoginButton').click();
+  await expect(page.locator('#authMessage')).toContainText('接続できませんでした');
+  await expect(page.locator('#passwordLoginButton')).toBeEnabled();
+  await page.evaluate(() => {
+    window.__qa.authThrow = false;
+    window.__qa.authError = { code: 'over_email_send_rate_limit', status: 429, message: 'raw provider error' };
+  });
+  await page.locator('#magicLinkButton').click();
+  await expect(page.locator('#authMessage')).toContainText('メールの送信回数が上限に達しました');
+  await expect(page.locator('#magicLinkButton')).toBeEnabled();
+  await page.evaluate(() => { window.__qa.authError = null; window.__qa.authDelay = 300; });
+  await page.locator('#magicLinkButton').click();
+  await expect(page.locator('#forgotPasswordButton')).toBeDisabled();
+  await expect(page.locator('#authMessage')).toContainText('ログインリンクが届きます');
+  await expect(page.locator('#authMessage')).toContainText('迷惑メールフォルダ');
+  await expect(page.locator('#forgotPasswordButton')).toBeEnabled();
+  expect(await page.evaluate(() => window.__qa.authCalls.at(-1))).toEqual({
+    method: 'signInWithOtp', email: 'fixture@example.test',
+    options: { shouldCreateUser: false, emailRedirectTo: page.url() }
+  });
+});

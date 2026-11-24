@@ -155,6 +155,7 @@
           <input id="confirmAuthPassword" type="password" autocomplete="new-password" minlength="8" />
         </div>
       </div>
+      <div class="auth-message" id="authMessage" role="status" aria-live="polite" aria-atomic="true"></div>
       <div class="auth-actions">
         <button class="auth-action auth-action--primary" id="passwordLoginButton" type="button">パスワードでログイン</button>
         <button class="auth-action" id="magicLinkButton" type="button">Magic Linkを送信</button>
@@ -162,7 +163,6 @@
         <button class="auth-action auth-action--primary" id="updatePasswordButton" type="button" hidden>新しいパスワードを保存</button>
         <button class="auth-action auth-action--danger" id="logoutButton" type="button" hidden>ログアウト</button>
       </div>
-      <p class="auth-message" id="authMessage" role="status" aria-live="polite"></p>
       <p class="auth-privacy-note">UI設定はこの端末に保存されます。ログイン時は学習状態と「自分の回答」をSupabaseへ同期します。</p>
     </div>
   </dialog>

@@ -4,6 +4,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4/+esm';
 import { queueLocalStateMigration, mergeScopedLocalState } from './state-migration.js?v={{ asset_version }}';
 import * as searchCore from './search-core.js?v={{ asset_version }}';
+import { authErrorNotice } from './auth-messages.js?v={{ asset_version }}';
 
 const SUPABASE_URL = 'https://qxekaaxgsugcneeumjzi.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_9jUDxgO6K0VTOVFkkbaNQg_YPVzFuvJ';
@@ -86,10 +87,45 @@ function showLoadFailure(scope) {
   }
 }
 
-function setAuthMessage(message, type = '') {
+function setAuthMessage(message, type = '', detail = '') {
   if (!authMessage) return;
-  authMessage.textContent = message;
+  authMessage.replaceChildren();
   authMessage.dataset.type = type;
+  if (detail) {
+    const heading = document.createElement('strong');
+    heading.className = 'auth-message__title';
+    heading.textContent = message;
+    const explanation = document.createElement('span');
+    explanation.className = 'auth-message__detail';
+    explanation.textContent = detail;
+    authMessage.append(heading, explanation);
+  } else {
+    authMessage.textContent = message;
+  }
+}
+
+let authRequestInFlight = false;
+function showAuthError(error, action) {
+  const { title, detail } = authErrorNotice(error, action);
+  setAuthMessage(title, 'error', detail);
+}
+
+async function runAuthRequest(action, progress, request, onSuccess) {
+  if (authRequestInFlight) return;
+  authRequestInFlight = true;
+  const buttons = [passwordLoginButton, magicLinkButton, forgotPasswordButton, updatePasswordButton];
+  buttons.forEach(button => { button.disabled = true; });
+  setAuthMessage(progress);
+  try {
+    const { error } = await request();
+    if (error) throw error;
+    onSuccess();
+  } catch (error) {
+    showAuthError(error, action);
+  } finally {
+    authRequestInFlight = false;
+    buttons.forEach(button => { button.disabled = false; });
+  }
 }
 
 function openAuthDialog() {
@@ -356,67 +392,58 @@ window.InterviewPrivateStore = {
 };
 
 async function passwordLogin() {
-  const email = authEmail?.value.trim();
-  const password = authPassword?.value || '';
-  if (!email || !password) return setAuthMessage('メールアドレスとパスワードを入力してください。', 'error');
-  passwordLoginButton.disabled = true;
-  setAuthMessage('ログインしています…');
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-  passwordLoginButton.disabled = false;
-  if (error) return setAuthMessage(error.message, 'error');
-  setAuthMessage('ログインしました。題庫と個人データを読み込みます…', 'success');
-  window.location.reload();
+  if (authRequestInFlight) return;
+  const email = authEmail.value.trim();
+  const password = authPassword.value;
+  if (!email || !authEmail.checkValidity()) {
+    return setAuthMessage('正しいメールアドレスを入力してください。', 'error');
+  }
+  if (!password) return setAuthMessage('パスワードを入力してください。', 'error');
+  await runAuthRequest('password', 'ログインしています…',
+    () => supabase.auth.signInWithPassword({ email, password }),
+    () => {
+      setAuthMessage('ログインしました。題庫と個人データを読み込みます…', 'success');
+      window.location.reload();
+    });
 }
 
 async function sendMagicLink() {
-  const email = authEmail?.value.trim();
-  if (!email) return setAuthMessage('メールアドレスを入力してください。', 'error');
-  magicLinkButton.disabled = true;
-  setAuthMessage('ログインリンクを送信しています…');
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: { shouldCreateUser: false, emailRedirectTo: APP_URL }
-  });
-  magicLinkButton.disabled = false;
-  if (error) return setAuthMessage(error.message, 'error');
-  setAuthMessage('メールを確認し、ログインリンクを開いてください。', 'success');
+  if (authRequestInFlight) return;
+  const email = authEmail.value.trim();
+  if (!email || !authEmail.checkValidity()) return setAuthMessage('正しいメールアドレスを入力してください。', 'error');
+  await runAuthRequest('magic', 'ログインリンクを送信しています…',
+    () => supabase.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: false, emailRedirectTo: APP_URL }
+    }),
+    () => setAuthMessage('メールをご確認ください', 'success',
+      '登録済みの場合、ログインリンクが届きます。メールのリンクを開いてください。届かない場合は、迷惑メールフォルダもご確認ください。'));
 }
 
 async function sendPasswordReset() {
-  const email = authEmail?.value.trim();
+  if (authRequestInFlight) return;
+  const email = authEmail.value.trim();
   if (!email || !authEmail.checkValidity()) return setAuthMessage('正しいメールアドレスを入力してください。', 'error');
-  forgotPasswordButton.disabled = true;
-  setAuthMessage('パスワード再設定メールを送信しています…');
-  try {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: APP_URL });
-    if (error) throw error;
-    setAuthMessage('登録済みの場合、再設定メールが届きます。メールのリンクを開いてください。', 'success');
-  } catch (error) {
-    setAuthMessage(error?.message || '送信できませんでした。もう一度お試しください。', 'error');
-  } finally {
-    forgotPasswordButton.disabled = false;
-  }
+  await runAuthRequest('reset', 'パスワード再設定メールを送信しています…',
+    () => supabase.auth.resetPasswordForEmail(email, { redirectTo: APP_URL }),
+    () => setAuthMessage('メールをご確認ください', 'success',
+      '登録済みの場合、再設定メールが届きます。メールのリンクを開いてください。届かない場合は、迷惑メールフォルダもご確認ください。'));
 }
 
 async function updateRecoveredPassword() {
-  if (!session?.user?.id || passwordRecoveryOwner !== session.user.id) return;
+  if (authRequestInFlight || !session?.user?.id || passwordRecoveryOwner !== session.user.id) return;
   const password = newAuthPassword.value;
   if (password.length < 8) return setAuthMessage('パスワードは8文字以上で入力してください。', 'error');
   if (password !== confirmAuthPassword.value) return setAuthMessage('確認用のパスワードが一致しません。', 'error');
-  updatePasswordButton.disabled = true;
-  try {
-    const { error } = await supabase.auth.updateUser({ password });
-    if (error) throw error;
-    newAuthPassword.value = '';
-    confirmAuthPassword.value = '';
-    passwordRecoveryOwner = null;
-    setAuthMessage('パスワードを更新しました。題庫を読み込みます…', 'success');
-    window.location.reload();
-  } catch (error) {
-    setAuthMessage(error?.message || '更新できませんでした。もう一度お試しください。', 'error');
-  } finally {
-    updatePasswordButton.disabled = false;
-  }
+  await runAuthRequest('update', 'パスワードを更新しています…',
+    () => supabase.auth.updateUser({ password }),
+    () => {
+      newAuthPassword.value = '';
+      confirmAuthPassword.value = '';
+      passwordRecoveryOwner = null;
+      setAuthMessage('パスワードを更新しました。題庫を読み込みます…', 'success');
+      window.location.reload();
+    });
 }
 
 async function logout() {
@@ -435,6 +462,11 @@ async function logout() {
   window.location.reload();
 }
 
+for (const field of [authEmail, authPassword, newAuthPassword, confirmAuthPassword]) {
+  field?.addEventListener('input', () => {
+    if (!authRequestInFlight && authMessage?.dataset.type === 'error') setAuthMessage('');
+  });
+}
 authButton?.addEventListener('click', openAuthDialog);
 authCloseButton?.addEventListener('click', closeAuthDialog);
 passwordLoginButton?.addEventListener('click', passwordLogin);

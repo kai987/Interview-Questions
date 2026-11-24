@@ -10,7 +10,8 @@ test('a guest can request password recovery and retry a sending error', async ({
   await page.locator('#authEmail').fill('fixture@example.test');
   await page.evaluate(() => { window.__qa.authError = 'Synthetic SMTP failure'; });
   await page.locator('#forgotPasswordButton').click();
-  await expect(page.locator('#authMessage')).toContainText('Synthetic SMTP failure');
+  await expect(page.locator('#authMessage')).toContainText('再設定メールを送信できませんでした');
+  await expect(page.locator('#authMessage')).not.toContainText('Synthetic SMTP failure');
   await expect(page.locator('#forgotPasswordButton')).toBeEnabled();
   await page.evaluate(() => { window.__qa.authError = null; });
   await page.locator('#forgotPasswordButton').click();
@@ -35,7 +36,8 @@ test('cold-start recovery shows the reset form and keeps it usable after a serve
   await page.locator('#confirmAuthPassword').fill('fixture-password');
   await page.evaluate(() => { window.__qa.authError = 'Synthetic update failure'; });
   await page.locator('#updatePasswordButton').click();
-  await expect(page.locator('#authMessage')).toContainText('Synthetic update failure');
+  await expect(page.locator('#authMessage')).toContainText('パスワードを更新できませんでした');
+  await expect(page.locator('#authMessage')).not.toContainText('Synthetic update failure');
   await expect(page.locator('#updatePasswordButton')).toBeEnabled();
   await page.evaluate(() => { window.__qa.authError = null; });
   await page.locator('#updatePasswordButton').click();
