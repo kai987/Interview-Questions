@@ -14,3 +14,6 @@ __pycache__/
 
 # Browser test dependencies
 node_modules/
+
+# Rust offline auditor build output
+/tools/interview-audio-audit/target/

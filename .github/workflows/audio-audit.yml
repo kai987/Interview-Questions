@@ -1,0 +1,50 @@
+name: Rust audio audit parity
+on:
+  push:
+    paths:
+      - 'tools/interview-audio-audit/**'
+      - 'scripts/_generate_aivis_audio_core.py'
+      - 'scripts/_generate_aivis_audio_launcher.py'
+      - 'scripts/backfill_audio_durations.py'
+      - 'scripts/generate_aivis_audio.py'
+      - 'tests/test_audio_*.py'
+      - '.github/workflows/audio-audit.yml'
+  pull_request:
+    paths:
+      - 'tools/interview-audio-audit/**'
+      - 'scripts/_generate_aivis_audio_core.py'
+      - 'scripts/_generate_aivis_audio_launcher.py'
+      - 'scripts/backfill_audio_durations.py'
+      - 'scripts/generate_aivis_audio.py'
+      - 'tests/test_audio_*.py'
+      - '.github/workflows/audio-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Use stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+      - name: Ensure FFmpeg tools
+        timeout-minutes: 3
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -o Acquire::Retries=2
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          ffprobe -version
+      - name: Rust unit tests
+        run: cargo test --locked --manifest-path tools/interview-audio-audit/Cargo.toml
+      - name: Build audit CLI
+        run: cargo build --locked --release --manifest-path tools/interview-audio-audit/Cargo.toml
+      - name: Compare with existing Python audio contract
+        run: |
+          python3 tools/interview-audio-audit/parity.py --binary tools/interview-audio-audit/target/release/interview-audio-audit

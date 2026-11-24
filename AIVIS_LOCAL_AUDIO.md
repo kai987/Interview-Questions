@@ -139,3 +139,7 @@ This updates manifests only. To register a verified recording and its duration i
 Duration checks: `python3 -m unittest discover -s tests -p 'test_*.py'`.
 
 Older verified recordings can retain the registration format `legacy:<source-hash>:<audio-sha256>` and their old filename. The browser verifies both current text and downloaded bytes. New uploads use the versioned filename for every answer length. Variants without a matching recording use browser speech; full audio is never played for different short/standard text.
+
+## Read-only Rust audio audit
+
+Before regeneration or upload, the optional [Rust audit CLI](tools/interview-audio-audit/README.md) can check local manifest and file integrity, measure WAV/MP3 durations, identify duplicate bytes and plan coverage against a private local export. It never modifies audio, authenticates, or uploads. The Python generation/upload path and its generation hash checks remain unchanged.

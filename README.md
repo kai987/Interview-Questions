@@ -197,3 +197,7 @@ alter table public.interview_user_state
 ## ライセンス
 
 [MIT License](LICENSE)
+
+### Rust 音声監査（オフライン・読み取り専用）
+
+既存の Python 生成・アップロードを変更せず、ローカル録音の SHA-256、WAV/MP3 実測時間、マニフェスト、同一音声の重複、任意の問答エクスポートとの一致を独立に検証する Rust CLI を追加しました。手順と Python との互換性テストは [Rust audio audit](tools/interview-audio-audit/README.md) を参照してください。個人回答や録音は CI に送信しません。
